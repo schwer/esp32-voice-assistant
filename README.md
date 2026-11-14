@@ -12,6 +12,7 @@ There's no phone app and no cloud backend of your own.
 - Echo cancellation via Espressif AFE
 - **On-device memory**: appointments and notes stored on flash, exposed to the model as tools
 - Spoken reminders, triggered by the device itself
+- Wake word with Wi-Fi off between conversations, for battery operation. See [docs/power.md](docs/power.md).
 - Local setup page at `http://assistant.local`
 - `.ics` export of appointments
 - Optional account integrations (Google Calendar, IMAP, CalDAV, Outlook), authorized on your LAN.
@@ -20,14 +21,16 @@ There's no phone app and no cloud backend of your own.
 ## Architecture
 
 ```
-mic → I2S → AFE (AEC/VAD) → 16 kHz PCM ─┐
-                                        ├─ wss:// Gemini Live (BidiGenerateContent)
-speaker ← I2S ← jitter buffer ← 24 kHz ─┘
+mic → I2S → AFE (AEC/VAD) → 16 kHz PCM ──────────┐
+                                                 ├─ wss:// Gemini Live (BidiGenerateContent)
+speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
                                  toolCall → tools → appointments (LittleFS)
 ```
 
 | Component | Responsibility |
 |---|---|
+| `components/board` | Pin map and I2C addresses for the target board |
+| `components/wakeword` | Always-on wake word detection |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |
@@ -36,8 +39,9 @@ speaker ← I2S ← jitter buffer ← 24 kHz ─┘
 
 ## Hardware
 
-- ESP32-S3 with **8 MB PSRAM** (e.g. N16R8 modules)
-- I2S audio codec with mic + speaker amp (ESP32-S3-Box-3, Korvo-2, or a custom board)
+- Reference board: **Waveshare ESP32-S3-AUDIO-Board** (ESP32-S3R8, ES8311 + ES7210, dual mics, battery header)
+- Other ESP32-S3 boards with **8 MB PSRAM** need a `components/board/include/board.h` for their pins
+- 3.7 V LiPo on the MX1.25 header for battery use
 
 ## Building
 
