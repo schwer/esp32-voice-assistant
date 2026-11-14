@@ -1,0 +1,13 @@
+# id	text  (spoken status messages; regenerate clips by editing this file)
+ready	Ready. Say Jarvis when you need me.
+need_wifi	I need Wi-Fi. Use the install page to connect me to your network.
+need_api_key	I'm online, but I need a Gemini API key. Open my setup page to add one.
+wifi_lost	I lost the Wi-Fi connection. I'll keep trying.
+wifi_back	I'm back online.
+no_internet	Sorry, I can't reach the internet right now.
+gemini_failed	Sorry, I couldn't reach Gemini. Please check my setup page.
+saved	Saved.
+settings_saved	Settings saved.
+deleted	Deleted.
+error	Sorry, something went wrong.
+speaker_test	This is a speaker test. If you can hear me, the speaker works.
