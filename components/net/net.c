@@ -7,6 +7,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "esp_netif_sntp.h"
 #include "net.h"
 
 static const char *TAG = "net";
@@ -26,6 +27,12 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupClearBits(s_events, BIT_FAILED);
         xEventGroupSetBits(s_events, BIT_CONNECTED);
+        static bool sntp_started;
+        if (!sntp_started) {
+            // Clock for TLS, Gemini's sense of "today", and reminders.
+            esp_sntp_config_t c = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+            sntp_started = esp_netif_sntp_init(&c) == ESP_OK;
+        }
     }
 }
 

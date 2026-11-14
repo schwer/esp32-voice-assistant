@@ -28,6 +28,8 @@ static void feed_task(void *arg)
         // Interleaved frames laid out as described by CONFIG_VA_AFE_INPUT_FORMAT.
         if (audio_read_raw(buf, chunk, channels, portMAX_DELAY) == (size_t)chunk) {
             s_afe->feed(s_data, buf);
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(20));   // no audio (e.g. codec not ready): don't spin
         }
     }
 }
@@ -37,6 +39,7 @@ static void fetch_task(void *arg)
     for (;;) {
         afe_fetch_result_t *res = s_afe->fetch(s_data);
         if (!res || res->ret_value == ESP_FAIL) {
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
         if (!s_conversing && res->wakeup_state == WAKENET_DETECTED) {

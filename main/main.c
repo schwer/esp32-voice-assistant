@@ -12,6 +12,9 @@
 #include "setup_web.h"
 #include "net.h"
 #include "improv.h"
+#include "settings.h"
+#include <stdlib.h>
+#include <time.h>
 
 static const char *TAG = "main";
 
@@ -36,8 +39,10 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     s_events = xQueueCreate(4, sizeof(app_event_t));
 
-    // TODO: load settings from NVS (written by the setup page / web flasher)
-    // TODO: restore time from the PCF85063 RTC, set TZ
+    ESP_ERROR_CHECK(settings_init());
+    setenv("TZ", settings_get_tz(), 1);
+    tzset();
+    // TODO: restore time from the PCF85063 RTC
 
     ESP_ERROR_CHECK(net_init());
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
@@ -45,12 +50,18 @@ void app_main(void)
         net_connect(10000);                    // first boot: sync time, show setup URL
     }
 
-    ESP_ERROR_CHECK(appointments_init());
-    ESP_ERROR_CHECK(audio_init());
-    ESP_ERROR_CHECK(setup_web_start());
+    // Setup page first, so the device stays configurable even if audio fails.
+    if (setup_web_start() != ESP_OK) {
+        ESP_LOGE(TAG, "setup page failed to start");
+    }
 
+    ESP_ERROR_CHECK(appointments_init());
+
+    // Audio problems are logged, not fatal: a reboot loop would hide the setup page.
     wakeword_config_t wcfg = { .on_wake = on_wake, .on_audio = on_audio };
-    ESP_ERROR_CHECK(wakeword_start(&wcfg));
+    if (audio_init() != ESP_OK || wakeword_start(&wcfg) != ESP_OK) {
+        ESP_LOGE(TAG, "audio/wake word unavailable; setup page still running");
+    }
 
     for (;;) {
         app_event_t ev;

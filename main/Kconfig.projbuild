@@ -2,8 +2,9 @@ menu "Voice Assistant"
 
     config VA_TIMEZONE
         string "POSIX timezone string"
-        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        default "UTC0"
         help
+            Default only; users pick their time zone on the setup page.
             Used so the assistant can resolve "next Tuesday at 3".
 
     config VA_TOKEN_URL
