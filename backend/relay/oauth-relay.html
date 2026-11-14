@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Voice Assistant OAuth relay</title>
+<!-- Static page used as the OAuth redirect URI. It only forwards the browser
+     (with ?code=&state=) to the device on your LAN. It never sees tokens:
+     the device exchanges the code itself using PKCE. -->
+<script>
+  const q = new URLSearchParams(location.search);
+  let host = "assistant.local";
+  try { const s = JSON.parse(atob(q.get("state") || "")); if (s.host) host = s.host; } catch (e) {}
+  if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) host = "assistant.local";
+  location.replace("http://" + host + "/oauth/callback" + location.search);
+</script>
+<p>Returning to your voice assistant…</p>

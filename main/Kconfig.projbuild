@@ -1,0 +1,38 @@
+menu "Voice Assistant"
+
+    config VA_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+
+    config VA_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config VA_TIMEZONE
+        string "POSIX timezone string"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            Used so the assistant can resolve "next Tuesday at 3".
+
+    config VA_TOKEN_URL
+        string "Ephemeral token endpoint (optional)"
+        default ""
+        help
+            URL that returns a short-lived Gemini Live token.
+            Leave empty to use VA_GEMINI_API_KEY (prototyping only).
+
+    config VA_GEMINI_API_KEY
+        string "Gemini API key (prototyping only, do not ship)"
+        default ""
+
+    config VA_GEMINI_MODEL
+        string "Gemini Live model"
+        default "models/gemini-live-latest"
+        help
+            Check the Gemini docs for the current native-audio Live model name.
+
+    config VA_VOICE_NAME
+        string "Voice name"
+        default "Puck"
+
+endmenu
