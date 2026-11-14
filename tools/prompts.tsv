@@ -11,3 +11,7 @@ settings_saved	Settings saved.
 deleted	Deleted.
 error	Sorry, something went wrong.
 speaker_test	This is a speaker test. If you can hear me, the speaker works.
+wake_ack_1	Yes?
+wake_ack_2	I'm listening.
+wake_ack_3	How can I help?
+not_ready	I heard you, but I can't hold conversations yet. That part is still being built.
