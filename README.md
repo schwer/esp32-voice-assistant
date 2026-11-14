@@ -35,7 +35,7 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/wakeword` | Always-on wake word detection |
 | `components/net` | Wi-Fi station, credentials in NVS, power on/off |
 | `components/improv` | Improv Wi-Fi over serial for the web flasher |
-| `components/leds` | LED ring status: blue pulse = connecting, color cycle = listening, white = speaking, red = error |
+| `components/leds` | LED ring status lights (legend and previews on `/diag`) |
 | `components/storage` | LittleFS on the `storage` partition at `/data` |
 | `components/conversations` | Saved conversations: rolling transcript, save/list/load/delete |
 | `components/diag` | Diagnostics: log capture, health snapshot, API key check (`/diag`) |
@@ -44,6 +44,22 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/tools` | Function declarations + dispatch |
 | `components/appointments` | Persistent store, summaries, reminders |
 | `components/setup_web` | Local setup UI, `.ics` export, future OAuth callback |
+
+## Lights
+
+| Pattern | Meaning |
+|---|---|
+| Off | Idle, waiting for "Jarvis" |
+| Quick white flash | Heard "Jarvis" |
+| Blue pulse | Starting up or connecting |
+| Rainbow cycle | Ready for your voice |
+| Purple spinner | Working on your request |
+| Soft white glow | Assistant is talking |
+| 2 green blinks | Saved (conversation or settings) |
+| Orange sweep | Deleted |
+| Amber blink every few seconds | Wi-Fi or API key missing |
+| Amber breathing | A reminder is due |
+| 3 red blinks | Something went wrong (see `/diag`) |
 
 ## Hardware
 

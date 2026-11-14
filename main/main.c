@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -28,6 +29,7 @@ static QueueHandle_t s_events;
 
 static void on_wake(void *ctx)
 {
+    leds_event(LEDS_EVENT_WAKE);
     app_event_t ev = EV_WAKE;
     xQueueSend(s_events, &ev, 0);
 }
@@ -38,9 +40,30 @@ static void on_gemini_state(gemini_state_t st, void *ctx)
     case GEMINI_STATE_CONNECTING:     leds_set(LEDS_CONNECTING); break;
     case GEMINI_STATE_READY:          leds_set(LEDS_LISTENING);  break;   // ready for your voice
     case GEMINI_STATE_MODEL_SPEAKING: leds_set(LEDS_SPEAKING);   break;
-    case GEMINI_STATE_CLOSED:         leds_set(LEDS_OFF);        break;
+    case GEMINI_STATE_CLOSED:         leds_set(idle_state());    break;
     case GEMINI_STATE_ERROR:          leds_set(LEDS_ERROR);      break;
     }
+}
+
+/** Idle light: dark when everything's ready, amber blink when setup is missing. */
+static leds_state_t idle_state(void)
+{
+    return (net_is_connected() && settings_has_api_key()) ? LEDS_OFF : LEDS_SETUP_NEEDED;
+}
+
+/** Wraps tool calls with light feedback (thinking, then saved/deleted). */
+static cJSON *tool_handler(const char *name, const cJSON *args)
+{
+    leds_set(LEDS_THINKING);
+    cJSON *r = tools_handle_call(name, args);
+    bool failed = cJSON_GetObjectItem(r, "error") != NULL;
+    if (!failed && strncmp(name, "save_", 5) == 0) {
+        leds_event(LEDS_EVENT_SAVED);
+    } else if (!failed && strncmp(name, "delete_", 7) == 0) {
+        leds_event(LEDS_EVENT_DELETED);
+    }
+    leds_set(LEDS_LISTENING);             // the model's reply follows
+    return r;
 }
 
 static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
@@ -90,10 +113,8 @@ void app_main(void)
     if (online) {
         leds_set(LEDS_LISTENING);
         vTaskDelay(pdMS_TO_TICKS(2000));
-        leds_set(LEDS_OFF);
-    } else {
-        leds_set(LEDS_ERROR);
     }
+    leds_set(idle_state());
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
@@ -122,7 +143,16 @@ void app_main(void)
 
     for (;;) {
         app_event_t ev;
-        xQueueReceive(s_events, &ev, portMAX_DELAY);
+        if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            // Keep the idle light in sync with Wi-Fi / API key changes.
+            leds_state_t cur = leds_get();
+            if (cur == LEDS_OFF || cur == LEDS_SETUP_NEEDED) {
+                leds_state_t want = idle_state();
+                if (want != cur) leds_set(want);
+            }
+            diag_set_status("wifi", net_is_connected() ? "connected" : "not connected (retrying)");
+            continue;
+        }
         switch (ev) {
         case EV_WAKE: {
             ESP_LOGI(TAG, "wake: starting conversation");
@@ -136,7 +166,7 @@ void app_main(void)
             conversations_session_begin();
             wakeword_converse();                       // audio now flows to Gemini (buffered)
             gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
-            cfg.tool_handler = tools_handle_call;
+            cfg.tool_handler = tool_handler;
             cfg.on_state = on_gemini_state;
             cfg.system_instruction_extra = appointments_summary(14);
             if (gemini_live_start(&cfg) != ESP_OK) {
@@ -147,7 +177,7 @@ void app_main(void)
         }
         case EV_SESSION_ENDED:
             gemini_live_stop();
-            leds_set(LEDS_OFF);
+            leds_set(idle_state());
 #if CONFIG_VA_WIFI_OFF_WHEN_IDLE
             net_disconnect();
 #endif

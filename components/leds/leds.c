@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <math.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
@@ -12,12 +13,57 @@ static const char *TAG = "leds";
 
 #define FRAME_MS    33
 #define BRIGHTNESS  48          // of 255; the ring is bright and costs battery
+#define PREVIEW_MS  4000
 
 static led_strip_handle_t s_strip;
 static TaskHandle_t s_task;
 static volatile leds_state_t s_state = LEDS_OFF;
+static volatile int s_event = -1;          // active one-shot event, -1 = none
+static volatile bool s_event_restart;
+static TimerHandle_t s_preview_timer;
+static leds_state_t s_preview_restore;
+static volatile bool s_previewing;
 
-static uint8_t scale(float v) { return (uint8_t)(v * BRIGHTNESS); }
+static const struct { const char *name, *desc; } STATES[LEDS_STATE_COUNT] = {
+    [LEDS_OFF]          = { "off",          "Off: idle, waiting for \"Jarvis\"" },
+    [LEDS_CONNECTING]   = { "connecting",   "Blue pulse: starting up or connecting" },
+    [LEDS_LISTENING]    = { "listening",    "Rainbow cycle: ready for your voice" },
+    [LEDS_THINKING]     = { "thinking",     "Purple spinner: working on your request" },
+    [LEDS_SPEAKING]     = { "speaking",     "Soft white glow: assistant is talking" },
+    [LEDS_SETUP_NEEDED] = { "setup_needed", "Amber blink every few seconds: Wi-Fi or API key missing" },
+    [LEDS_REMINDER]     = { "reminder",     "Amber breathing: a reminder is due" },
+    [LEDS_ERROR]        = { "error",        "3 red blinks: something went wrong (see diagnostics)" },
+};
+
+static const struct { const char *name, *desc; } EVENTS[LEDS_EVENT_COUNT] = {
+    [LEDS_EVENT_WAKE]    = { "wake",    "Quick white flash: heard \"Jarvis\"" },
+    [LEDS_EVENT_SAVED]   = { "saved",   "2 green blinks: saved" },
+    [LEDS_EVENT_DELETED] = { "deleted", "Orange sweep: deleted" },
+};
+
+const char *leds_state_name(leds_state_t s)        { return s < LEDS_STATE_COUNT ? STATES[s].name : ""; }
+const char *leds_state_description(leds_state_t s) { return s < LEDS_STATE_COUNT ? STATES[s].desc : ""; }
+const char *leds_event_name(leds_event_t e)        { return e < LEDS_EVENT_COUNT ? EVENTS[e].name : ""; }
+const char *leds_event_description(leds_event_t e) { return e < LEDS_EVENT_COUNT ? EVENTS[e].desc : ""; }
+
+// ---------- drawing ----------
+
+static uint8_t scale(float v)
+{
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    return (uint8_t)(v * BRIGHTNESS);
+}
+
+static void px(int i, float r, float g, float b)
+{
+    led_strip_set_pixel(s_strip, i, scale(r), scale(g), scale(b));
+}
+
+static void fill(float r, float g, float b)
+{
+    for (int i = 0; i < BOARD_LED_COUNT; i++) px(i, r, g, b);
+}
 
 /** Hue (0..1) to RGB at full saturation/value. */
 static void hue_rgb(float h, float *r, float *g, float *b)
@@ -36,68 +82,136 @@ static void hue_rgb(float h, float *r, float *g, float *b)
     }
 }
 
-static void fill(float r, float g, float b)
+static float breathe(float t, float period, float lo)
 {
+    return lo + (1.0f - lo) * (0.5f - 0.5f * cosf(t * 2.0f * (float)M_PI / period));
+}
+
+/** Comet: bright head with a fading tail, rotating once per period. */
+static void spinner(float t, float period, float r, float g, float b)
+{
+    float head = fmodf(t / period, 1.0f) * BOARD_LED_COUNT;
     for (int i = 0; i < BOARD_LED_COUNT; i++) {
-        led_strip_set_pixel(s_strip, i, scale(r), scale(g), scale(b));
+        float d = fmodf(head - i + BOARD_LED_COUNT, BOARD_LED_COUNT);   // distance behind head
+        float v = d < 3.0f ? 1.0f - d / 3.0f : 0.06f;
+        px(i, r * v, g * v, b * v);
+    }
+}
+
+/** Draw a state frame. Returns false when the state is finished (error) or static-dark. */
+static bool draw_state(leds_state_t st, float t)
+{
+    switch (st) {
+    case LEDS_OFF:
+        led_strip_clear(s_strip);
+        return false;
+    case LEDS_CONNECTING:
+        fill(0, 0.35f * breathe(t, 1.2f, 0.15f), breathe(t, 1.2f, 0.15f));
+        return true;
+    case LEDS_LISTENING:
+        for (int i = 0; i < BOARD_LED_COUNT; i++) {
+            float r, g, b;
+            hue_rgb(fmodf((float)i / BOARD_LED_COUNT + t / 1.5f, 1.0f), &r, &g, &b);
+            px(i, r, g, b);
+        }
+        return true;
+    case LEDS_THINKING:
+        spinner(t, 0.8f, 0.6f, 0.1f, 1.0f);
+        return true;
+    case LEDS_SPEAKING: {
+        float v = 0.55f + 0.25f * sinf(t * 2.0f * (float)M_PI / 2.0f);
+        fill(v, v, v * 0.9f);
+        return true;
+    }
+    case LEDS_SETUP_NEEDED: {
+        float p = fmodf(t, 4.0f);
+        float v = p < 0.4f ? sinf(p / 0.4f * (float)M_PI) : 0;
+        fill(v, 0.55f * v, 0);
+        return true;
+    }
+    case LEDS_REMINDER: {
+        float v = breathe(t, 2.0f, 0.1f);
+        fill(v, 0.55f * v, 0);
+        return true;
+    }
+    case LEDS_ERROR: {
+        bool on = t < 1.5f && ((int)(t / 0.25f) % 2) == 0;
+        fill(on ? 1.0f : 0, 0, 0);
+        return t < 1.5f;
+    }
+    default:
+        return false;
+    }
+}
+
+/** Draw an event frame. Returns false when the event has finished. */
+static bool draw_event(leds_event_t ev, float t)
+{
+    switch (ev) {
+    case LEDS_EVENT_WAKE: {
+        if (t > 0.35f) return false;
+        float v = 1.0f - t / 0.35f;
+        fill(v, v, v);
+        return true;
+    }
+    case LEDS_EVENT_SAVED: {
+        if (t > 0.9f) return false;
+        bool on = t < 0.2f || (t > 0.4f && t < 0.6f);
+        fill(0, on ? 1.0f : 0, on ? 0.2f : 0);
+        return true;
+    }
+    case LEDS_EVENT_DELETED: {
+        if (t > 0.8f) return false;
+        int lit = (int)(t / 0.8f * BOARD_LED_COUNT);
+        for (int i = 0; i < BOARD_LED_COUNT; i++) {
+            bool on = i >= lit;
+            px(i, on ? 1.0f : 0, on ? 0.35f : 0, 0);
+        }
+        return true;
+    }
+    default:
+        return false;
     }
 }
 
 static void leds_task(void *arg)
 {
-    uint32_t frame = 0;
-    leds_state_t last = (leds_state_t)-1;
+    uint32_t state_frame = 0, event_frame = 0;
+    leds_state_t last_state = (leds_state_t)-1;
 
     for (;;) {
         leds_state_t st = s_state;
-        if (st != last) {
-            frame = 0;
-            last = st;
+        if (st != last_state) {
+            state_frame = 0;
+            last_state = st;
         }
-        const float t = frame * FRAME_MS / 1000.0f;
-
-        switch (st) {
-        case LEDS_OFF:
-            led_strip_clear(s_strip);
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);    // sleep until state changes
-            continue;
-
-        case LEDS_CONNECTING: {
-            float v = 0.15f + 0.85f * (0.5f - 0.5f * cosf(t * 2.0f * (float)M_PI / 1.2f));
-            fill(0, 0.35f * v, v);
-            break;
+        if (s_event_restart) {
+            s_event_restart = false;
+            event_frame = 0;
         }
 
-        case LEDS_LISTENING:
-            // Rainbow rotating around the ring, one full turn every ~1.5 s.
-            for (int i = 0; i < BOARD_LED_COUNT; i++) {
-                float h = fmodf((float)i / BOARD_LED_COUNT + t / 1.5f, 1.0f);
-                float r, g, b;
-                hue_rgb(h, &r, &g, &b);
-                led_strip_set_pixel(s_strip, i, scale(r), scale(g), scale(b));
+        bool animating;
+        int ev = s_event;
+        if (ev >= 0) {
+            animating = draw_event((leds_event_t)ev, event_frame++ * FRAME_MS / 1000.0f);
+            if (!animating) {
+                s_event = -1;
+                animating = true;             // redraw the state next frame
             }
-            break;
-
-        case LEDS_SPEAKING: {
-            float v = 0.55f + 0.25f * sinf(t * 2.0f * (float)M_PI / 2.0f);
-            fill(v, v, v * 0.9f);
-            break;
-        }
-
-        case LEDS_ERROR: {
-            bool on = ((int)(t / 0.25f) % 2) == 0;
-            if (t > 1.5f) {
+        } else {
+            animating = draw_state(st, state_frame++ * FRAME_MS / 1000.0f);
+            if (!animating && st == LEDS_ERROR) {
                 s_state = LEDS_OFF;
             }
-            fill(on ? 1.0f : 0, 0, 0);
-            break;
-        }
         }
         led_strip_refresh(s_strip);
-        frame++;
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(FRAME_MS));
+
+        // Sleep until the next frame, or indefinitely when dark and idle.
+        ulTaskNotifyTake(pdTRUE, animating ? pdMS_TO_TICKS(FRAME_MS) : portMAX_DELAY);
     }
 }
+
+// ---------- API ----------
 
 esp_err_t leds_init(void)
 {
@@ -122,23 +236,56 @@ esp_err_t leds_init(void)
 
 void leds_set(leds_state_t state)
 {
+    if (state >= LEDS_STATE_COUNT) return;
+    if (s_previewing) {
+        s_preview_restore = state;     // apply once the preview ends
+        return;
+    }
     s_state = state;
-    if (s_task) {
-        xTaskNotifyGive(s_task);
-    }
+    if (s_task) xTaskNotifyGive(s_task);
 }
 
-static void test_done(TimerHandle_t t)
+leds_state_t leds_get(void)
 {
-    leds_set(LEDS_OFF);
+    return s_previewing ? s_preview_restore : s_state;
 }
 
-void leds_test(void)
+void leds_event(leds_event_t event)
 {
-    static TimerHandle_t timer;
-    if (!timer) {
-        timer = xTimerCreate("led_test", pdMS_TO_TICKS(3000), pdFALSE, NULL, test_done);
+    if (event >= LEDS_EVENT_COUNT) return;
+    s_event = event;
+    s_event_restart = true;
+    if (s_task) xTaskNotifyGive(s_task);
+}
+
+static void preview_done(TimerHandle_t t)
+{
+    s_previewing = false;
+    leds_set(s_preview_restore);
+}
+
+bool leds_preview(const char *name)
+{
+    if (!s_preview_timer) {
+        s_preview_timer = xTimerCreate("led_preview", pdMS_TO_TICKS(PREVIEW_MS), pdFALSE, NULL, preview_done);
     }
-    leds_set(LEDS_LISTENING);
-    xTimerReset(timer, 0);
+    for (int i = 0; i < LEDS_EVENT_COUNT; i++) {
+        if (strcmp(name, EVENTS[i].name) == 0) {
+            leds_event((leds_event_t)i);
+            return true;
+        }
+    }
+    for (int i = 0; i < LEDS_STATE_COUNT; i++) {
+        if (strcmp(name, STATES[i].name) == 0) {
+            if (!s_previewing) {
+                s_preview_restore = s_state;
+                s_previewing = true;
+            }
+            s_state = (leds_state_t)i;
+            if (s_task) xTaskNotifyGive(s_task);
+            xTimerReset(s_preview_timer, 0);
+            return true;
+        }
+    }
+    return false;
 }

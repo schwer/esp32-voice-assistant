@@ -297,6 +297,12 @@ static esp_err_t post_save(httpd_req_t *req)
     }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));
+    if (err == ESP_OK) {
+        leds_event(LEDS_EVENT_SAVED);
+        if (leds_get() == LEDS_SETUP_NEEDED && settings_has_api_key() && net_is_connected()) {
+            leds_set(LEDS_OFF);
+        }
+    }
 
     httpd_resp_set_status(req, "303 See Other");
     httpd_resp_set_hdr(req, "Location", err == ESP_OK ? "/?saved=1" : "/?error=1");
@@ -360,14 +366,38 @@ static esp_err_t post_test_gemini(httpd_req_t *req)
     return send_json(req, diag_test_gemini());
 }
 
-static esp_err_t post_led_test(httpd_req_t *req)
+static esp_err_t get_leds_json(httpd_req_t *req)
+{
+    cJSON *r = cJSON_CreateObject();
+    cJSON *states = cJSON_AddArrayToObject(r, "states");
+    for (int i = 0; i < LEDS_STATE_COUNT; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", leds_state_name((leds_state_t)i));
+        cJSON_AddStringToObject(o, "description", leds_state_description((leds_state_t)i));
+        cJSON_AddItemToArray(states, o);
+    }
+    cJSON *events = cJSON_AddArrayToObject(r, "events");
+    for (int i = 0; i < LEDS_EVENT_COUNT; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", leds_event_name((leds_event_t)i));
+        cJSON_AddStringToObject(o, "description", leds_event_description((leds_event_t)i));
+        cJSON_AddItemToArray(events, o);
+    }
+    cJSON_AddStringToObject(r, "current", leds_state_name(leds_get()));
+    return send_json(req, r);
+}
+
+static esp_err_t post_led_preview(httpd_req_t *req)
 {
     if (!diag_action_allowed(req)) return forbid(req);
-    leds_test();
+    char q[48] = "", name[24] = "";
+    httpd_req_get_url_query_str(req, q, sizeof(q));
+    httpd_query_key_value(q, "name", name, sizeof(name));
+    bool ok = leds_preview(name);
     cJSON *r = cJSON_CreateObject();
-    cJSON_AddBoolToObject(r, "ok", true);
-    cJSON_AddStringToObject(r, "message",
-        "The ring should show a rotating rainbow for 3 seconds. If red looks green, tell the developer.");
+    cJSON_AddBoolToObject(r, "ok", ok);
+    cJSON_AddStringToObject(r, "message", ok ? "Showing it on the ring for a few seconds."
+                                             : "Unknown light pattern.");
     return send_json(req, r);
 }
 
@@ -419,7 +449,8 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag.json",        .method = HTTP_GET,  .handler = get_diag_json },
         { .uri = "/diag/logs",        .method = HTTP_GET,  .handler = get_diag_logs },
         { .uri = "/diag/test-gemini", .method = HTTP_POST, .handler = post_test_gemini },
-        { .uri = "/diag/led-test",    .method = HTTP_POST, .handler = post_led_test },
+        { .uri = "/diag/leds.json",   .method = HTTP_GET,  .handler = get_leds_json },
+        { .uri = "/diag/led-preview", .method = HTTP_POST, .handler = post_led_preview },
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
     };
     httpd_register_uri_handler(s_server, &root);
