@@ -32,5 +32,7 @@ esp_err_t audio_play(const int16_t *pcm, size_t samples);
 void audio_flush_playback(void);
 /** True while audio is queued or playing. */
 bool audio_is_playing(void);
+/** Wait until queued prompts/audio have finished playing (or timeout). */
+void audio_wait_idle(int timeout_ms);
 /** Output volume 0-100. */
 void audio_set_volume(int volume);

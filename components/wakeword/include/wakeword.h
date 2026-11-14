@@ -27,3 +27,13 @@ void wakeword_listen(void);
 
 /** Conversation mode: stop wake word detection, deliver audio to on_audio. */
 void wakeword_converse(void);
+
+/**
+ * Microphone test: record one utterance of clean audio (16 kHz mono).
+ * Blocks until the speaker stops talking (0.7 s of silence after speech) or
+ * timeout_ms passes. Wake word detection is paused meanwhile.
+ * Returns the number of samples captured (0 = no speech heard), or -1 if busy.
+ */
+int wakeword_capture(int16_t *buf, size_t max_samples, int timeout_ms);
+/** True while listening for "Jarvis" (not in a conversation or test). */
+bool wakeword_is_idle(void);

@@ -332,3 +332,12 @@ void audio_set_volume(int volume)
 {
     if (s_spk) esp_codec_dev_set_out_vol(s_spk, volume < 0 ? 0 : volume > 100 ? 100 : volume);
 }
+
+void audio_wait_idle(int timeout_ms)
+{
+    vTaskDelay(pdMS_TO_TICKS(300));                    // let queued prompts start
+    for (int t = 0; t < timeout_ms && audio_is_playing(); t += 50) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    vTaskDelay(pdMS_TO_TICKS(250));                    // tail of the speaker's echo
+}

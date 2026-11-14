@@ -101,11 +101,7 @@ static cJSON *tool_handler(const char *name, const cJSON *args)
 /** Wait for anything we're saying to finish, then listen for "Jarvis" again. */
 static void back_to_listening(void)
 {
-    vTaskDelay(pdMS_TO_TICKS(300));               // let queued prompts start
-    for (int i = 0; i < 200 && audio_is_playing(); i++) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-    vTaskDelay(pdMS_TO_TICKS(300));               // tail of the speaker's echo
+    audio_wait_idle(10000);
     leds_state_t cur = leds_get();
     if (cur != LEDS_ERROR) leds_set(idle_state());
     wakeword_listen();

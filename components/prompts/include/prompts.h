@@ -21,6 +21,9 @@ typedef enum {
     PROMPT_WAKE_ACK_2,     // "I'm listening."
     PROMPT_WAKE_ACK_3,     // "How can I help?"
     PROMPT_NOT_READY,      // "I heard you, but I can't hold conversations yet. ..."
+    PROMPT_MIC_TEST_START, // "Microphone test. Say hi."
+    PROMPT_MIC_TEST_HELLO, // "Hello! I heard you. Here's what you said."
+    PROMPT_MIC_TEST_NOTHING, // "I didn't hear anything. Check the microphone levels ..."
     PROMPT_COUNT
 } prompt_t;
 

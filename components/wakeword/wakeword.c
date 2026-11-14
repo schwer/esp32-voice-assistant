@@ -2,6 +2,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_afe_sr_models.h"
@@ -16,6 +17,36 @@ static const esp_afe_sr_iface_t *s_afe;
 static esp_afe_sr_data_t *s_data;
 static wakeword_config_t s_cfg;
 static volatile bool s_conversing;
+
+// Capture (microphone test)
+static struct {
+    volatile bool active;
+    int16_t *buf;
+    size_t max, len;
+    bool heard;
+    TickType_t last_speech;
+    SemaphoreHandle_t done;
+} s_cap;
+#define CAPTURE_END_SILENCE_MS 700
+
+static void capture_frame(const int16_t *pcm, size_t n, bool speech)
+{
+    TickType_t now = xTaskGetTickCount();
+    if (speech) {
+        s_cap.heard = true;
+        s_cap.last_speech = now;
+    }
+    if (s_cap.heard && s_cap.len < s_cap.max) {
+        size_t take = n < s_cap.max - s_cap.len ? n : s_cap.max - s_cap.len;
+        memcpy(s_cap.buf + s_cap.len, pcm, take * sizeof(int16_t));
+        s_cap.len += take;
+    }
+    bool ended = s_cap.heard && now - s_cap.last_speech > pdMS_TO_TICKS(CAPTURE_END_SILENCE_MS);
+    if (ended || s_cap.len >= s_cap.max) {
+        s_cap.active = false;
+        xSemaphoreGive(s_cap.done);
+    }
+}
 
 static void feed_task(void *arg)
 {
@@ -40,6 +71,10 @@ static void fetch_task(void *arg)
         afe_fetch_result_t *res = s_afe->fetch_with_delay(s_data, pdMS_TO_TICKS(100));
         if (!res || res->ret_value == ESP_FAIL || res->data_size <= 0) {
             vTaskDelay(pdMS_TO_TICKS(10));     // never spin: other tasks (web server) need the CPU
+            continue;
+        }
+        if (s_cap.active) {
+            capture_frame(res->data, res->data_size / sizeof(int16_t), res->vad_state == VAD_SPEECH);
             continue;
         }
         if (!s_conversing && res->wakeup_state == WAKENET_DETECTED) {
@@ -108,4 +143,31 @@ void wakeword_converse(void)
 {
     s_afe->disable_wakenet(s_data);
     s_conversing = true;
+}
+
+bool wakeword_is_idle(void)
+{
+    return s_afe && !s_conversing && !s_cap.active;
+}
+
+int wakeword_capture(int16_t *buf, size_t max_samples, int timeout_ms)
+{
+    if (!wakeword_is_idle()) return -1;
+    if (!s_cap.done) s_cap.done = xSemaphoreCreateBinary();
+    xSemaphoreTake(s_cap.done, 0);                     // clear a stale signal
+
+    s_afe->disable_wakenet(s_data);
+    s_cap.buf = buf;
+    s_cap.max = max_samples;
+    s_cap.len = 0;
+    s_cap.heard = false;
+    s_cap.last_speech = xTaskGetTickCount();
+    s_cap.active = true;
+
+    if (xSemaphoreTake(s_cap.done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        s_cap.active = false;                          // timed out
+        vTaskDelay(pdMS_TO_TICKS(50));                 // let the fetch task notice
+    }
+    s_afe->enable_wakenet(s_data);
+    return s_cap.heard ? (int)s_cap.len : 0;
 }

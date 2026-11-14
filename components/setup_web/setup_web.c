@@ -22,6 +22,7 @@
 #include "leds.h"
 #include "diag_page.h"
 #include "prompts.h"
+#include "selftest.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -425,6 +426,40 @@ static esp_err_t post_speaker_test(httpd_req_t *req)
     return send_json(req, r);
 }
 
+static esp_err_t mic_test_json(httpd_req_t *req, esp_err_t start_err)
+{
+    float secs = 0;
+    selftest_state_t st = selftest_mic_state(&secs);
+    cJSON *r = cJSON_CreateObject();
+    const char *state = st == SELFTEST_RUNNING ? "running"
+                      : st == SELFTEST_HEARD ? "heard"
+                      : st == SELFTEST_NOTHING ? "nothing" : "idle";
+    cJSON_AddStringToObject(r, "state", state);
+    cJSON_AddNumberToObject(r, "seconds", secs);
+    if (start_err == ESP_ERR_NOT_SUPPORTED) {
+        cJSON_AddBoolToObject(r, "ok", false);
+        cJSON_AddStringToObject(r, "message", "The microphones aren't running. Check the log.");
+    } else if (start_err == ESP_ERR_INVALID_STATE) {
+        cJSON_AddBoolToObject(r, "ok", false);
+        cJSON_AddStringToObject(r, "message", "The board is busy (in a conversation or another test). Try again in a moment.");
+    } else if (start_err != ESP_OK) {
+        cJSON_AddBoolToObject(r, "ok", false);
+        cJSON_AddStringToObject(r, "message", "Couldn't start the test.");
+    }
+    return send_json(req, r);
+}
+
+static esp_err_t post_mic_test(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    return mic_test_json(req, selftest_mic_start());
+}
+
+static esp_err_t get_mic_test(httpd_req_t *req)
+{
+    return mic_test_json(req, ESP_OK);
+}
+
 static void do_restart(TimerHandle_t t) { esp_restart(); }
 
 static esp_err_t post_reboot(httpd_req_t *req)
@@ -477,6 +512,8 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/led-preview", .method = HTTP_POST, .handler = post_led_preview },
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
         { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
+        { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
+        { .uri = "/diag/mic-test",    .method = HTTP_GET,  .handler = get_mic_test },
     };
     httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &save);
