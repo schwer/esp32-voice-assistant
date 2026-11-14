@@ -45,7 +45,7 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 
 ## Building
 
-Requires ESP-IDF 5.3+.
+Requires ESP-IDF 5.5+.
 
 ```bash
 idf.py set-target esp32s3
