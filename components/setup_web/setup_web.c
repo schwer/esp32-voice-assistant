@@ -435,7 +435,7 @@ esp_err_t setup_web_start(void)
         return ESP_OK;
     }
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.stack_size = 6144;
+    cfg.stack_size = 10240;              // the API key test does a TLS handshake here
     cfg.lru_purge_enable = true;
     cfg.max_uri_handlers = 16;
     esp_err_t err = httpd_start(&s_server, &cfg);
