@@ -195,6 +195,16 @@ class Improv {
     this.loop = this.readLoop();
   }
 
+  /** Restart the board into its firmware (not the bootloader). */
+  async restartBoard() {
+    try {
+      await this.port.setSignals({ dataTerminalReady: false });
+      await this.port.setSignals({ requestToSend: true });
+      await sleep(150);
+      await this.port.setSignals({ requestToSend: false });
+    } catch {}
+  }
+
   async close() {
     this.closed = true;
     try { await this.reader.cancel(); } catch {}
@@ -306,6 +316,8 @@ class Improv {
 
 // ---------------------------------------------------------------- flashing (esptool-js)
 let manifest;
+const RESTART_HELP = "the update was installed, but the board didn't restart by itself. " +
+  "Press the RESET button on the board (or unplug it and plug it back in), then click Connect again";
 async function loadManifest() {
   // The query string defeats GitHub Pages' CDN cache, so we always see the newest build.
   if (!manifest) manifest = await (await fetch(`manifest.json?t=${Date.now()}`, { cache: "no-store" })).json();
@@ -351,7 +363,15 @@ async function flash(port, { eraseAll = false } = {}) {
       },
     });
     step("Restarting the board…");
-    await loader.after("hard_reset");
+    // esptool-js 0.7's hard reset only releases RTS without pulsing it, which leaves
+    // the chip in the flasher. Pulse it ourselves: RTS on with DTR off holds the chip
+    // in reset, and releasing RTS with DTR off boots the new firmware normally.
+    try {
+      await transport.setDTR(false);
+      await transport.setRTS(true);
+      await sleep(150);
+      await transport.setRTS(false);
+    } catch {}
   } finally {
     try { await transport.disconnect(); } catch {}
     progress(null);
@@ -482,10 +502,20 @@ async function start({ eraseAll = false } = {}) {
       await flash(port, { eraseAll });
       step("Waiting for the board to start…");
       improv = await reopen(port);
-      if (!improv) throw new Error("the board didn't come back after restarting. Unplug it, plug it back in and click Connect");
+      if (!improv) throw new Error(RESTART_HELP);
       port = improv.port;
-      const after = await improv.info(15000);
-      if (!after) throw new Error("the new firmware didn't respond. Check the board log below");
+      let after = await improv.info(10000);
+      if (!after) {
+        // Still quiet: restart it once more, then look again.
+        step("Restarting the board again…");
+        await improv.restartBoard();
+        await improv.close();
+        improv = await reopen(port);
+        if (!improv) throw new Error(RESTART_HELP);
+        port = improv.port;
+        after = await improv.info(15000);
+      }
+      if (!after) throw new Error(RESTART_HELP);
       if (!isCurrent(after, manifest)) {
         throw new Error(`the board is still running ${after.version} instead of ${manifest.build}. ` +
                         "Unplug it, plug it back in and click Connect again");
@@ -499,7 +529,9 @@ async function start({ eraseAll = false } = {}) {
     if (!st || !st.ssid) await showWifiForm();
     else $("wifiCard").hidden = true;
   } catch (e) {
-    step(`Something went wrong: ${e.message}.`, "bad");
+    const msg = e.message.startsWith("the update was installed") ? `Almost done: ${e.message}.`
+                                                               : `Something went wrong: ${e.message}.`;
+    step(msg, "bad");
     log(`\nerror: ${e.stack || e}\n`);
   } finally {
     busy = false;
