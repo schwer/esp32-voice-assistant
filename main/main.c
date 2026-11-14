@@ -48,11 +48,21 @@ static void post(app_event_t ev)
     xQueueSend(s_events, &ev, 0);
 }
 
+static volatile bool s_search_on, s_search_retry;
+
 static void on_gemini_state(gemini_state_t st, void *ctx)
 {
     switch (st) {
     case GEMINI_STATE_CONNECTING:     leds_set(LEDS_CONNECTING); break;
-    case GEMINI_STATE_READY:          leds_set(LEDS_LISTENING);  break;   // ready for your voice
+    case GEMINI_STATE_READY:
+        if (s_search_retry) {
+            // Worked without search, so search was the problem: leave it off from now on.
+            ESP_LOGW(TAG, "Google Search isn't supported with this model; turned it off");
+            settings_set_search(false);
+            s_search_retry = false;
+        }
+        leds_set(LEDS_LISTENING);                                      // ready for your voice
+        break;
     case GEMINI_STATE_MODEL_SPEAKING: leds_set(LEDS_SPEAKING);   break;
     case GEMINI_STATE_CLOSED:         post(EV_SESSION_ENDED);    break;
     case GEMINI_STATE_ERROR:          post(EV_SESSION_FAILED);   break;
@@ -66,7 +76,7 @@ static void on_transcript(const char *role, const char *text, void *ctx)
 }
 
 /** System instruction for each conversation: persona, today's date, tool guidance, memory. */
-static char *build_instruction(void)
+static char *build_instruction(bool google_search)
 {
     char now[64] = "unknown";
     time_t t = time(NULL);
@@ -87,8 +97,14 @@ static char *build_instruction(void)
             "Current local date and time: %s (time zone %s).\n"
             "When the user says goodbye, thanks you to finish, or says they're done, say a very "
             "short goodbye and then call end_conversation.\n"
+            "The user's home location is %s.\n"
+            "%s"
             "%s%s%s",
-            settings_get_name(), now, settings_get_tz(), tools,
+            settings_get_name(), now, settings_get_tz(),
+            settings_get_location()[0] ? settings_get_location() : "not set",
+            google_search ? "Use Google Search for current information such as news, sports, "
+                            "opening hours, prices and facts you're unsure about.\n" : "",
+            tools,
             appts ? "\nUpcoming appointments:\n" : "", appts ? appts : "");
     }
     free(appts);
@@ -163,6 +179,34 @@ static void back_to_listening(void)
 static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 {
     gemini_live_send_audio(pcm, samples, speech);   // the client tracks the idle timeout
+}
+
+/** Open a Gemini Live session for this conversation. */
+static esp_err_t start_session(bool google_search, bool retry)
+{
+    char key[SETTINGS_API_KEY_MAX];
+    settings_get_api_key(key, sizeof(key));
+    char *instruction = build_instruction(google_search);
+    gemini_live_config_t cfg = {
+        .api_key = key,
+        .model = settings_get_model(),
+        .voice = settings_get_voice(),
+        .system_instruction = instruction,
+        .tools = tools_declarations(),
+        .tool_handler = tool_handler,
+        .on_state = on_gemini_state,
+        .on_transcript = on_transcript,
+        .idle_timeout_s = CONFIG_VA_IDLE_TIMEOUT_S,
+        .barge_in = BARGE_IN,
+        .google_search = google_search,
+        .keep_buffered_audio = retry,
+    };
+    s_search_on = google_search;
+    esp_err_t err = gemini_live_start(&cfg);
+    memset(key, 0, sizeof(key));
+    free(instruction);
+    diag_set_status("gemini", err == ESP_OK ? "connecting" : esp_err_to_name(err));
+    return err;
 }
 
 void app_main(void)
@@ -288,6 +332,7 @@ void app_main(void)
         switch (ev) {
         case EV_WAKE: {
             ESP_LOGI(TAG, "wake: starting conversation");
+            s_search_retry = false;
             wakeword_converse();                       // stop wake detection while we talk
             prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
             leds_set(LEDS_CONNECTING);
@@ -306,26 +351,7 @@ void app_main(void)
                 break;
             }
             conversations_session_begin();             // audio now flows to Gemini (buffered)
-            char key[SETTINGS_API_KEY_MAX];
-            settings_get_api_key(key, sizeof(key));
-            char *instruction = build_instruction();
-            gemini_live_config_t cfg = {
-                .api_key = key,
-                .model = settings_get_model(),
-                .voice = settings_get_voice(),
-                .system_instruction = instruction,
-                .tools = tools_declarations(),
-                .tool_handler = tool_handler,
-                .on_state = on_gemini_state,
-                .on_transcript = on_transcript,
-                .idle_timeout_s = CONFIG_VA_IDLE_TIMEOUT_S,
-                .barge_in = BARGE_IN,
-            };
-            esp_err_t gerr = gemini_live_start(&cfg);
-            memset(key, 0, sizeof(key));
-            free(instruction);
-            diag_set_status("gemini", gerr == ESP_OK ? "connecting" : esp_err_to_name(gerr));
-            if (gerr != ESP_OK) {
+            if (start_session(settings_get_search(), false) != ESP_OK) {
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 back_to_listening();
             }
@@ -346,10 +372,17 @@ void app_main(void)
             back_to_listening();
             break;
         case EV_SESSION_FAILED: {
-            char why[128];
+            char why[160];
             snprintf(why, sizeof(why), "failed: %s", gemini_live_last_error());
             diag_set_status("gemini", why);
             gemini_live_stop();
+            if (s_search_on && !s_search_retry) {
+                // Some Live models reject Google Search next to custom tools: try once
+                // without it, resending the speech buffered by the failed attempt.
+                ESP_LOGW(TAG, "retrying without Google Search");
+                s_search_retry = true;
+                if (start_session(false, true) == ESP_OK) break;
+            }
             set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
             back_to_listening();
             break;

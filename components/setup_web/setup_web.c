@@ -246,6 +246,15 @@ static esp_err_t get_root(httpd_req_t *req)
     send_escaped(req, settings_get_name());
     SEND(req, "\"><p class=note>What the assistant calls itself. The wake word stays \"Jarvis\".</p>");
 
+    SEND(req, "<label for=location>Home location</label><input id=location name=location maxlength=63 "
+              "placeholder='e.g. Boston, MA' value=\"");
+    send_escaped(req, settings_get_location());
+    SEND(req, "\"><p class=note>Used when you ask about the weather without naming a place.</p>");
+    SEND(req, "<label for=units>Temperature</label><select id=units name=units>");
+    SEND(req, settings_get_fahrenheit() ? "<option value=F selected>Fahrenheit</option><option value=C>Celsius</option>"
+                                        : "<option value=F>Fahrenheit</option><option value=C selected>Celsius</option>");
+    SEND(req, "</select>");
+
     static const char *const VOICES[] = { "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr" };
     SEND(req, "<label for=voice>Voice</label><select id=voice name=voice>");
     const char *cur_voice = settings_get_voice();
@@ -271,6 +280,12 @@ static esp_err_t get_root(httpd_req_t *req)
     send_escaped(req, settings_get_model());
     SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini API key</em> "
               "on the diagnostics page to check it.</p>");
+
+    SEND(req, "<label class=check><input type=checkbox name=search value=1");
+    if (settings_get_search()) SEND(req, " checked");
+    SEND(req, "> Let Gemini search the web</label>"
+              "<p class=note>For news, sports, opening hours and other current information. "
+              "Turns itself off if the selected model doesn't support it.</p>");
 
     SEND(req, "<input type=hidden name=spoken_present value=1>"
               "<label class=check><input type=checkbox name=spoken value=1");
@@ -337,9 +352,17 @@ static esp_err_t post_save(httpd_req_t *req)
         const char *m = strncmp(val, "models/", 7) == 0 ? val + 7 : val;   // accept either form
         err |= settings_set_model(m);
     }
+    if (form_field(body, "location", val, sizeof(val))) {
+        err |= settings_set_location(val);                // empty clears it
+    }
+    if (form_field(body, "units", val, sizeof(val)) && val[0]) {
+        err |= settings_set_fahrenheit(val[0] == 'F');
+    }
     if (form_field(body, "spoken_present", val, sizeof(val))) {
         bool on = form_field(body, "spoken", val, sizeof(val)) && strcmp(val, "1") == 0;
         err |= settings_set_spoken_status(on);
+        bool search = form_field(body, "search", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_search(search);
     }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));

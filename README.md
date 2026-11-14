@@ -13,6 +13,8 @@ There's no phone app and no cloud backend of your own.
 - Echo cancellation via Espressif AFE
 - **On-device memory**: appointments and notes stored on flash, exposed to the model as tools
 - Spoken reminders, triggered by the device itself
+- **Weather** from Open-Meteo (free, no key) for your home location or anywhere you name
+- **Google Search** grounding for current information (when the model supports it)
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
   hear the saved ones newest first and say "that one"
 - Wake word with Wi-Fi off between conversations, for battery operation. See [docs/power.md](docs/power.md).

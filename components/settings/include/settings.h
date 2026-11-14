@@ -32,6 +32,15 @@ const char *settings_get_voice(void);
 esp_err_t settings_set_model(const char *model);
 esp_err_t settings_set_voice(const char *voice);
 
+/** Home location for weather ("Boston, MA"), temperature units, web search. */
+#define SETTINGS_LOCATION_MAX 64
+const char *settings_get_location(void);
+esp_err_t settings_set_location(const char *location);
+bool settings_get_fahrenheit(void);
+esp_err_t settings_set_fahrenheit(bool on);
+bool settings_get_search(void);
+esp_err_t settings_set_search(bool on);
+
 /** Spoken status messages ("I need Wi-Fi", "Settings saved", ...). Default on. */
 bool settings_get_spoken_status(void);
 esp_err_t settings_set_spoken_status(bool on);

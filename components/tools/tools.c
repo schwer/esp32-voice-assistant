@@ -5,6 +5,8 @@
 #include "tools.h"
 #include "appointments.h"
 #include "conversations.h"
+#include "weather.h"
+#include "settings.h"
 
 static const char *TAG = "tools";
 
@@ -71,6 +73,14 @@ cJSON *tools_declarations(void)
              &props, id_req, 1);
     param(props, "id", "INTEGER", "The id from list_saved_conversations.");
 
+    function(decls, "get_weather",
+             "Current weather and forecast. Use for any question about weather, temperature, "
+             "rain, snow, wind or what to wear.",
+             &props, NULL, 0);
+    param(props, "location", "STRING",
+          "Place name, e.g. 'Chicago' or 'Paris, France'. Omit for the user's home location.");
+    param(props, "days", "INTEGER", "Forecast days, 1 (today) to 7. Default 1.");
+
     function(decls, "end_conversation",
              "End the conversation. Call after saying a short goodbye, when the user says "
              "goodbye or that they're done.",
@@ -100,7 +110,9 @@ const char *tools_system_instruction(void)
         "ask a short yes/no question to confirm.\n"
         "- After load_conversation, say in one sentence where you left off, then continue the "
         "conversation as if it never stopped. Saving again updates the same saved conversation.\n"
-        "- Never read ids aloud.\n";
+        "- Never read ids aloud.\n"
+        "Weather: use get_weather. Without a place it uses the user's home location. Give the "
+        "temperature as a whole number and mention rain or snow chances only when relevant.\n";
 }
 
 // ---------- dispatch ----------
@@ -122,6 +134,12 @@ cJSON *tools_handle_call(const char *name, const cJSON *args)
 {
     ESP_LOGI(TAG, "tool call: %s", name);
 
+    if (strcmp(name, "get_weather") == 0) {
+        const char *loc = arg_str(args, "location");
+        int days = arg_int(args, "days");
+        return weather_lookup(loc && loc[0] ? loc : settings_get_location(), days ? days : 1,
+                              settings_get_fahrenheit());
+    }
     if (strcmp(name, "save_conversation") == 0) {
         return conversations_save(arg_str(args, "title"), arg_str(args, "summary"));
     }

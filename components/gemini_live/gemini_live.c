@@ -161,10 +161,14 @@ static void send_setup(void)
     cJSON_AddStringToObject(part, "text", s_system ? s_system : "");
     cJSON_AddItemToArray(parts, part);
 
-    if (s_cfg.tools) {
-        cJSON_AddItemToObject(setup, "tools", s_cfg.tools);
-        s_cfg.tools = NULL;                          // now owned by root
+    cJSON *tools = s_cfg.tools ? s_cfg.tools : cJSON_CreateArray();
+    s_cfg.tools = NULL;                              // now owned by root
+    if (s_cfg.google_search) {
+        cJSON *gs = cJSON_CreateObject();
+        cJSON_AddObjectToObject(gs, "googleSearch");
+        cJSON_AddItemToArray(tools, gs);
     }
+    cJSON_AddItemToObject(setup, "tools", tools);
     cJSON_AddObjectToObject(setup, "inputAudioTranscription");
     cJSON_AddObjectToObject(setup, "outputAudioTranscription");
     // Keep long conversations affordable: older turns slide out of the context.
@@ -173,7 +177,8 @@ static void send_setup(void)
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (json) {
-        ESP_LOGI(TAG, "setup: model %s, voice %s (%u bytes)", model, s_cfg.voice, (unsigned)strlen(json));
+        ESP_LOGI(TAG, "setup: model %s, voice %s, search %s (%u bytes)", model, s_cfg.voice,
+                 s_cfg.google_search ? "on" : "off", (unsigned)strlen(json));
         send_json(json, strlen(json));
         free(json);
     }
@@ -410,7 +415,8 @@ esp_err_t gemini_live_start(const gemini_live_config_t *cfg)
     s_ready = false;
     s_closing = false;
     s_turn_done = false;
-    s_send_len = s_preroll_len = 0;
+    s_send_len = 0;
+    if (!cfg->keep_buffered_audio) s_preroll_len = 0;
     s_user_text[0] = s_asst_text[0] = 0;
     s_state = (gemini_state_t)-1;
     touch();

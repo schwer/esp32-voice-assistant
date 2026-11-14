@@ -36,6 +36,8 @@ typedef struct {
     void *ctx;
     int idle_timeout_s;                  // end after this much silence from both sides
     bool barge_in;                       // keep the mic open while Gemini talks (needs working AEC)
+    bool google_search;                  // add Google Search grounding next to our function tools
+    bool keep_buffered_audio;            // retry: resend speech buffered by the previous attempt
 } gemini_live_config_t;
 
 /** Start connecting. Progress and the end of the session arrive via on_state. */
