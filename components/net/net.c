@@ -9,6 +9,7 @@
 #include "esp_event.h"
 #include "esp_netif_sntp.h"
 #include "esp_timer.h"
+#include "freertos/task.h"
 #include "net.h"
 
 static const char *TAG = "net";
@@ -21,6 +22,7 @@ static esp_netif_t *s_netif;
 static bool s_started;
 static volatile bool s_want;          // we want to be online (not powered down for battery)
 static int s_attempts;
+static volatile int s_last_reason;     // last disconnect reason (0 = none yet)
 static esp_timer_handle_t s_retry_timer;
 
 #define FAST_RETRIES   5              // quick retries before reporting failure
@@ -38,11 +40,13 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *d = data;
         xEventGroupClearBits(s_events, BIT_CONNECTED);
+        s_last_reason = d->reason;
         if (!s_want) {
             return;
         }
         s_attempts++;
-        ESP_LOGW(TAG, "disconnected (reason %d), attempt %d", d->reason, s_attempts);
+        ESP_LOGW(TAG, "disconnected: %s (reason %d), attempt %d",
+                 net_reason_text(d->reason), d->reason, s_attempts);
         if (s_attempts < FAST_RETRIES) {
             esp_wifi_connect();                       // transient failures are common
         } else {
@@ -50,8 +54,11 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             esp_timer_start_once(s_retry_timer, RETRY_DELAY_US);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *e = data;
         s_attempts = 0;
-        ESP_LOGI(TAG, "connected");
+        s_last_reason = 0;
+        ESP_LOGI(TAG, "connected, IP " IPSTR " - setup page: http://" IPSTR "/",
+                 IP2STR(&e->ip_info.ip), IP2STR(&e->ip_info.ip));
         xEventGroupClearBits(s_events, BIT_FAILED);
         xEventGroupSetBits(s_events, BIT_CONNECTED);
         static bool sntp_started;
@@ -128,9 +135,16 @@ esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms)
     strlcpy((char *)c.sta.password, password, sizeof(c.sta.password));
     c.sta.threshold.authmode = password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
+    c.sta.pmf_cfg.capable = true;                    // allow WPA2/WPA3 mixed networks
+    c.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;            // and WPA3-only networks
+
+    s_want = false;                                   // don't auto-retry the old network
+    esp_timer_stop(s_retry_timer);
     if (s_started) {
         esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(200));               // let the disconnect event drain
     }
+    ESP_LOGI(TAG, "trying new Wi-Fi network '%s'", ssid);
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &c));
     esp_err_t err = start_and_wait(timeout_ms);
     if (err != ESP_OK) {
@@ -160,6 +174,48 @@ void net_disconnect(void)
 bool net_is_connected(void)
 {
     return s_events && (xEventGroupGetBits(s_events) & BIT_CONNECTED);
+}
+
+const char *net_reason_text(int reason)
+{
+    switch (reason) {
+    case 0:   return "no attempt yet";
+    case WIFI_REASON_NO_AP_FOUND:
+        return "network not found (check the name; it must be a 2.4 GHz network)";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_MIC_FAILURE:
+        return "wrong Wi-Fi password";
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_ASSOC_EXPIRE:
+    case WIFI_REASON_BEACON_TIMEOUT:
+        return "weak signal or router not responding";
+    case WIFI_REASON_ASSOC_TOOMANY:
+        return "router has too many devices connected";
+    case WIFI_REASON_CONNECTION_FAIL:
+        return "connection failed";
+    default:
+        return "connection lost";
+    }
+}
+
+void net_log_status(void)
+{
+    if (net_is_connected()) {
+        char url[64] = "";
+        net_device_url(url, sizeof(url));
+        ESP_LOGI(TAG, "STATUS: Wi-Fi connected. Setup page: %s", url);
+        return;
+    }
+    wifi_config_t c = {0};
+    esp_wifi_get_config(WIFI_IF_STA, &c);
+    if (!c.sta.ssid[0]) {
+        ESP_LOGW(TAG, "STATUS: no Wi-Fi saved. Use 'Configure Wi-Fi' on the install page.");
+    } else {
+        ESP_LOGW(TAG, "STATUS: not connected to '%s': %s. Still retrying.",
+                 (const char *)c.sta.ssid, net_reason_text(s_last_reason));
+    }
 }
 
 esp_err_t net_device_url(char *buf, size_t len)

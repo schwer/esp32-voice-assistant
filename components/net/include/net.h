@@ -15,5 +15,9 @@ esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms);
 /** Turn Wi-Fi off (battery saving between conversations). */
 void net_disconnect(void);
 bool net_is_connected(void);
+/** Plain-language text for a Wi-Fi disconnect reason code. */
+const char *net_reason_text(int reason);
+/** Log a one-line plain-language Wi-Fi status (for the serial console). */
+void net_log_status(void);
 /** Writes e.g. "http://192.168.1.50/" into buf. */
 esp_err_t net_device_url(char *buf, size_t len);

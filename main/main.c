@@ -153,6 +153,10 @@ void app_main(void)
                 if (want != cur) leds_set(want);
             }
             diag_set_status("wifi", net_is_connected() ? "connected" : "not connected (retrying)");
+            static int ticks;
+            if (!net_is_connected() || ++ticks % 12 == 0) {
+                net_log_status();          // every 5 s while offline, every minute when online
+            }
             continue;
         }
         switch (ev) {
