@@ -12,7 +12,7 @@ manifest = {
     "name": "ESP32 Voice Assistant",
     "version": sys.argv[2],
     "build": sys.argv[3][:7],
-    "new_install_prompt_erase": False,
+    "new_install_prompt_erase": True,   # never erase without asking
     "new_install_improv_wait_time": 15,
     "builds": [{
         "chipFamily": "ESP32-S3",

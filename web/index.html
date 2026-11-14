@@ -284,8 +284,8 @@ class Improv {
 
   async status() {
     try {
-      const [ssid, url, rssi] = await this.rpc(CMD_STATUS, [], { timeout: 2000 });
-      return { ssid, url, rssi: rssi ? Number(rssi) : null };
+      const [ssid, url, rssi, saved] = await this.rpc(CMD_STATUS, [], { timeout: 2000 });
+      return { ssid, url, rssi: rssi ? Number(rssi) : null, saved: saved ?? null };
     } catch { return null; }   // older firmware without the vendor command
   }
 
@@ -400,8 +400,12 @@ function showStatus(info, st) {
     a.href = st.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = st.url;
     url.append(a);
     $("urlNote").hidden = false;
+  } else if (st && st.saved) {
+    wifi.textContent = `can't join "${st.saved}" right now`; wifi.className = "bad";
+    url.textContent = "available once the board is on Wi-Fi";
+    $("urlNote").hidden = true;
   } else {
-    wifi.textContent = "not connected"; wifi.className = "bad";
+    wifi.textContent = "not set up yet"; wifi.className = "bad";
     url.textContent = "available once the board is on Wi-Fi";
     $("urlNote").hidden = true;
   }
@@ -432,9 +436,18 @@ async function showWifiForm() {
 
 $("ssid").addEventListener("change", () => { $("otherWrap").hidden = $("ssid").value !== "__other__"; });
 
-async function refreshStatus() {
+async function refreshStatus({ waitForWifi = false } = {}) {
   const info = await improv.info(4000);
-  const st = await improv.status();
+  let st = await improv.status();
+  // After a restart the board needs a few seconds to rejoin its saved network.
+  if (waitForWifi && st && !st.ssid && st.saved) {
+    const until = Date.now() + 30000;
+    while (Date.now() < until && st && !st.ssid) {
+      step(`Waiting for the board to rejoin "${st.saved}"…`);
+      await sleep(1500);
+      st = (await improv.status()) || st;
+    }
+  }
   showStatus(info, st);
   return { info, st };
 }
@@ -472,7 +485,9 @@ async function start({ eraseAll = false } = {}) {
       step(info ? "Updated to the latest firmware. Your settings were kept." : "Installed.", "ok");
     }
 
-    const { st } = await refreshStatus();
+    const before = $("step").textContent, cls = $("step").className;
+    const { st } = await refreshStatus({ waitForWifi: true });
+    step(before, cls);
     if (!st || !st.ssid) await showWifiForm();
     else $("wifiCard").hidden = true;
   } catch (e) {

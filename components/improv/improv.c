@@ -26,7 +26,7 @@ enum { ERR_NONE = 0x00, ERR_INVALID_RPC = 0x01, ERR_UNKNOWN_RPC = 0x02,
        ERR_UNABLE_TO_CONNECT = 0x03, ERR_UNKNOWN = 0xFF };
 enum { CMD_WIFI_SETTINGS = 0x01, CMD_GET_STATE = 0x02, CMD_GET_INFO = 0x03,
        CMD_GET_NETWORKS = 0x04,
-       CMD_VENDOR_STATUS = 0xF0 };   // ours: [ssid, setup URL, rssi], used by the install page
+       CMD_VENDOR_STATUS = 0xF0 };   // ours: [ssid, setup URL, rssi, saved ssid] for the install page
 
 static const uint8_t HEADER[6] = {'I', 'M', 'P', 'R', 'O', 'V'};
 #define VERSION 1
@@ -172,12 +172,13 @@ static void handle_rpc(port_t port, const uint8_t *d, uint8_t len)
     }
 
     case CMD_VENDOR_STATUS: {
-        char ssid[33], url[64] = "", rssi[8] = "";
+        char ssid[33], saved[33], url[64] = "", rssi[8] = "";
         net_current_ssid(ssid, sizeof(ssid));
+        net_saved_ssid(saved, sizeof(saved));
         net_device_url(url, sizeof(url));
         if (ssid[0]) snprintf(rssi, sizeof(rssi), "%d", net_rssi());
-        const char *s[] = { ssid, url, rssi };
-        send_result(port, cmd, s, 3);
+        const char *s[] = { ssid, url, rssi, saved };
+        send_result(port, cmd, s, 4);
         break;
     }
 

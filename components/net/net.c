@@ -291,3 +291,13 @@ int net_rssi(void)
     wifi_ap_record_t ap;
     return (net_is_connected() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
 }
+
+void net_saved_ssid(char *buf, size_t len)
+{
+    wifi_config_t c = {0};
+    if (esp_wifi_get_config(WIFI_IF_STA, &c) == ESP_OK) {
+        strlcpy(buf, (const char *)c.sta.ssid, len);
+    } else {
+        buf[0] = 0;
+    }
+}

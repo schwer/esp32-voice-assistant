@@ -20,6 +20,8 @@ bool net_is_connected(void);
 int net_scan(wifi_ap_record_t *out, int max);
 /** SSID of the connected network, or "" when offline. */
 void net_current_ssid(char *buf, size_t len);
+/** SSID saved in flash (even when not connected), or "". */
+void net_saved_ssid(char *buf, size_t len);
 /** Signal strength of the current connection in dBm (0 when offline). */
 int net_rssi(void);
 /** Plain-language text for a Wi-Fi disconnect reason code. */
