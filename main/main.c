@@ -10,6 +10,8 @@
 #include "tools.h"
 #include "appointments.h"
 #include "setup_web.h"
+#include "net.h"
+#include "improv.h"
 
 static const char *TAG = "main";
 
@@ -37,6 +39,12 @@ void app_main(void)
     // TODO: load settings from NVS (written by the setup page / web flasher)
     // TODO: restore time from the PCF85063 RTC, set TZ
 
+    ESP_ERROR_CHECK(net_init());
+    ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
+    if (net_has_credentials()) {
+        net_connect(10000);                    // first boot: sync time, show setup URL
+    }
+
     ESP_ERROR_CHECK(appointments_init());
     ESP_ERROR_CHECK(audio_init());
     ESP_ERROR_CHECK(setup_web_start());
@@ -50,7 +58,11 @@ void app_main(void)
         switch (ev) {
         case EV_WAKE: {
             ESP_LOGI(TAG, "wake: starting conversation");
-            // TODO: chime, Wi-Fi fast reconnect, SNTP if stale
+            // TODO: chime, SNTP if stale
+            if (net_connect(8000) != ESP_OK) {
+                ESP_LOGW(TAG, "no Wi-Fi");      // TODO: spoken/LED error
+                break;
+            }
             wakeword_converse();                       // audio now flows to Gemini (buffered)
             gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
             cfg.tool_handler = tools_handle_call;
@@ -62,7 +74,9 @@ void app_main(void)
         }
         case EV_SESSION_ENDED:
             gemini_live_stop();
-            // TODO: Wi-Fi off if CONFIG_VA_WIFI_OFF_WHEN_IDLE
+#if CONFIG_VA_WIFI_OFF_WHEN_IDLE
+            net_disconnect();
+#endif
             wakeword_listen();
             break;
         }

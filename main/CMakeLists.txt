@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES nvs_flash esp_wifi esp_netif esp_event
-             audio wakeword gemini_live tools appointments setup_web board
+    REQUIRES nvs_flash
+             audio wakeword gemini_live tools appointments setup_web board net improv
 )

@@ -1,13 +1,5 @@
 menu "Voice Assistant"
 
-    config VA_WIFI_SSID
-        string "Wi-Fi SSID"
-        default ""
-
-    config VA_WIFI_PASSWORD
-        string "Wi-Fi password"
-        default ""
-
     config VA_TIMEZONE
         string "POSIX timezone string"
         default "CET-1CEST,M3.5.0,M10.5.0/3"

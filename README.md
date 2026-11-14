@@ -31,6 +31,8 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 |---|---|
 | `components/board` | Pin map and I2C addresses for the target board |
 | `components/wakeword` | Always-on wake word detection |
+| `components/net` | Wi-Fi station, credentials in NVS, power on/off |
+| `components/improv` | Improv Wi-Fi over serial for the web flasher |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |
@@ -43,13 +45,19 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 - Other ESP32-S3 boards with **8 MB PSRAM** need a `components/board/include/board.h` for their pins
 - 3.7 V LiPo on the MX1.25 header for battery use
 
+## Installing
+
+Open the web flasher (GitHub Pages for this repo) in desktop Chrome or Edge, connect the
+board over USB and click **Install**. You'll be asked for your Wi-Fi network right after
+flashing (Improv Wi-Fi). Then open the device's setup page to enter your API key.
+
 ## Building
 
 Requires ESP-IDF 5.5+.
 
 ```bash
 idf.py set-target esp32s3
-idf.py menuconfig      # Voice Assistant → Wi-Fi, timezone, API key / token URL
+idf.py menuconfig      # Voice Assistant → timezone, API key / token URL (dev builds only)
 idf.py build flash monitor
 ```
 
