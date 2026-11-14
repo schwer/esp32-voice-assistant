@@ -41,6 +41,10 @@ esp_err_t settings_set_fahrenheit(bool on);
 bool settings_get_search(void);
 esp_err_t settings_set_search(bool on);
 
+/** Battery saver: Wi-Fi off after a few quiet minutes when running on battery. Default on. */
+bool settings_get_battery_saver(void);
+esp_err_t settings_set_battery_saver(bool on);
+
 /** Spoken status messages ("I need Wi-Fi", "Settings saved", ...). Default on. */
 bool settings_get_spoken_status(void);
 esp_err_t settings_set_spoken_status(bool on);

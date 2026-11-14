@@ -31,7 +31,8 @@ static const char *TAG = "gemini";
                  "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key="
 #define RATE            16000
 #define SEND_SAMPLES    1600                        // 100 ms per realtimeInput message
-#define PREROLL_SAMPLES (RATE * 4)                  // speech captured before the session is ready
+#define PREROLL_SAMPLES (RATE * 10)                 // speech captured before the session is ready
+                                                    // (incl. Wi-Fi reconnect in battery saver)
 #define CONNECT_TIMEOUT_MS 12000
 #define TRANSCRIPT_MAX  2048
 

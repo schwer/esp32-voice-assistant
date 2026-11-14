@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <time.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_http_server.h"
 #include "esp_app_desc.h"
 #include "mdns.h"
@@ -31,6 +32,9 @@
 
 static const char *TAG = "setup_web";
 static httpd_handle_t s_server;
+static volatile int64_t s_last_activity_us;
+
+int64_t setup_web_last_activity_us(void) { return s_last_activity_us; }
 
 typedef struct { const char *label; const char *posix; } tz_option_t;
 
@@ -182,6 +186,7 @@ static const char PAGE_HEAD[] =
 
 static esp_err_t get_root(httpd_req_t *req)
 {
+    s_last_activity_us = esp_timer_get_time();
     ESP_LOGI(TAG, "GET %s", req->uri);
     char q[32] = {0}, url[64] = "", hint[8] = "", now[40] = "";
     bool saved = httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && strstr(q, "saved=1");
@@ -290,6 +295,12 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini API key</em> "
               "on the diagnostics page to check it.</p>");
 
+    SEND(req, "<label class=check><input type=checkbox name=saver value=1");
+    if (settings_get_battery_saver()) SEND(req, " checked");
+    SEND(req, "> Battery saver</label>"
+              "<p class=note>On battery, Wi-Fi turns off after 3 quiet minutes and back on when you say "
+              "\"Jarvis\". This page is unreachable while it's off. On USB power Wi-Fi always stays on.</p>");
+
     SEND(req, "<label class=check><input type=checkbox name=search value=1");
     if (settings_get_search()) SEND(req, " checked");
     SEND(req, "> Let Gemini search the web</label>"
@@ -374,6 +385,8 @@ static esp_err_t post_save(httpd_req_t *req)
         err |= settings_set_spoken_status(on);
         bool search = form_field(body, "search", val, sizeof(val)) && strcmp(val, "1") == 0;
         err |= settings_set_search(search);
+        bool saver = form_field(body, "saver", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_battery_saver(saver);
     }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));
@@ -423,6 +436,7 @@ static esp_err_t get_diag(httpd_req_t *req)
 
 static esp_err_t get_diag_json(httpd_req_t *req)
 {
+    s_last_activity_us = esp_timer_get_time();
     return send_json(req, diag_snapshot());
 }
 

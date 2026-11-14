@@ -24,6 +24,8 @@ void net_current_ssid(char *buf, size_t len);
 void net_saved_ssid(char *buf, size_t len);
 /** Signal strength of the current connection in dBm (0 when offline). */
 int net_rssi(void);
+/** Idle: let the radio doze between beacons. Conversation: stay fully awake (smooth audio). */
+void net_power_save(bool idle);
 /** Plain-language text for a Wi-Fi disconnect reason code. */
 const char *net_reason_text(int reason);
 /** Log a one-line plain-language Wi-Fi status (for the serial console). */

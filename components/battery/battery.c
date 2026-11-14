@@ -197,3 +197,17 @@ cJSON *battery_report(void)
     cJSON_AddNumberToObject(r, "uptime_minutes", (int)(now / 60000000));
     return r;
 }
+
+bool battery_on_battery(void)
+{
+    battery_status_t b;
+    battery_read(&b);
+    if (!b.present) return false;
+    float slope;
+    if (slope_v_per_hour(15, &slope)) {
+        if (slope > 0.01f) return false;                         // charging
+        if (b.volts >= 4.15f && slope > -0.01f) return false;    // full, on USB power
+        return true;
+    }
+    return b.volts < 4.10f;            // no history yet: below full charge = on battery
+}

@@ -49,8 +49,7 @@ menu "Voice Assistant"
         int "End session after N seconds of silence"
         default 20
         help
-            Closes the Gemini session (and turns Wi-Fi off on battery)
-            to save power and tokens.
+            Closes the Gemini session to save tokens.
 
     config VA_BARGE_IN
         bool "Let the user interrupt the assistant while it talks"
@@ -60,11 +59,5 @@ menu "Voice Assistant"
             echo cancellation (correct AFE input layout); otherwise Gemini hears
             itself and keeps interrupting. Off = the mic pauses while it talks.
 
-    config VA_WIFI_OFF_WHEN_IDLE
-        bool "Turn Wi-Fi off between conversations"
-        default n
-        help
-            Big battery saving. Adds roughly 1-3 s reconnect latency
-            after the wake word; speech is buffered meanwhile.
 
 endmenu

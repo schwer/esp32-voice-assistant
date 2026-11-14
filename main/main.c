@@ -5,6 +5,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "audio.h"
 #include "wakeword.h"
@@ -113,10 +114,14 @@ static char *build_instruction(bool google_search)
     return buf;
 }
 
+static volatile bool s_wifi_saving;          // Wi-Fi off on purpose (battery saver)
+static int64_t s_last_activity_us;           // last conversation / wake / page use
+
 /** Idle light: dark when everything's ready, amber blink when setup is missing. */
 static leds_state_t idle_state(void)
 {
-    return (net_is_connected() && settings_has_api_key()) ? LEDS_OFF : LEDS_SETUP_NEEDED;
+    bool wifi_ok = net_is_connected() || (s_wifi_saving && net_has_credentials());
+    return (wifi_ok && settings_has_api_key()) ? LEDS_OFF : LEDS_SETUP_NEEDED;
 }
 
 // ---- Say what a blinking light means -------------------------------------
@@ -173,6 +178,8 @@ static cJSON *tool_handler(const char *name, const cJSON *args)
 static void back_to_listening(void)
 {
     audio_wait_idle(10000);
+    net_power_save(true);                      // radio dozes while idle
+    s_last_activity_us = esp_timer_get_time();
     leds_state_t cur = leds_get();
     if (cur != LEDS_ERROR) leds_set(idle_state());
     wakeword_listen();
@@ -246,6 +253,40 @@ static void check_voicepack(void)
     last_attempt = xTaskGetTickCount();
     ESP_LOGI(TAG, "recording status messages in %s's voice", settings_get_voice());
     voicepack_start();
+}
+
+/**
+ * Battery saver: on battery, turn Wi-Fi off after a few quiet minutes; turn it back
+ * on when the board is plugged in or the saver is switched off ("Jarvis" also does).
+ * Returns true while Wi-Fi is off on purpose.
+ */
+#define SAVER_IDLE_US (3LL * 60 * 1000000)
+static bool battery_saver(void)
+{
+    bool on_batt = battery_on_battery();
+    if (s_wifi_saving) {
+        if (!on_batt || !settings_get_battery_saver()) {
+            ESP_LOGI(TAG, "battery saver: Wi-Fi back on (%s)", on_batt ? "saver turned off" : "external power");
+            s_wifi_saving = false;
+            net_connect(10000);
+            s_last_activity_us = esp_timer_get_time();
+            return false;
+        }
+        diag_set_status("wifi", "off to save battery (say \"Jarvis\" to wake it)");
+        return true;
+    }
+    int64_t now = esp_timer_get_time();
+    int64_t last = s_last_activity_us > setup_web_last_activity_us() ? s_last_activity_us
+                                                                      : setup_web_last_activity_us();
+    if (settings_get_battery_saver() && on_batt && net_is_connected() &&
+        now - last > SAVER_IDLE_US && wakeword_is_idle() && !voicepack_busy() && !audio_is_playing()) {
+        ESP_LOGI(TAG, "battery saver: no one has talked to me for 3 minutes, turning Wi-Fi off");
+        s_wifi_saving = true;
+        net_disconnect();
+        diag_set_status("wifi", "off to save battery (say \"Jarvis\" to wake it)");
+        return true;
+    }
+    return false;
 }
 
 /** Open a Gemini Live session for this conversation. */
@@ -335,7 +376,9 @@ void app_main(void)
         prompts_say(PROMPT_READY);
     }
     bool was_online = online;
-    bool wifi_expected = true;                 // false while Wi-Fi is off to save battery
+    bool wifi_expected = true;                 // false while Wi-Fi is off on purpose
+    s_last_activity_us = esp_timer_get_time();
+    net_power_save(true);
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
@@ -369,6 +412,9 @@ void app_main(void)
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
             check_battery();
             check_voicepack();
+            if (battery_saver()) {
+                continue;                              // Wi-Fi is off on purpose: nothing to report
+            }
             bool now_online = net_is_connected();
             diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
             prompt_t reason = PROMPT_COUNT;
@@ -412,15 +458,19 @@ void app_main(void)
             wakeword_converse();                       // stop wake detection while we talk
             prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
             leds_set(LEDS_CONNECTING);
-            // TODO: chime, SNTP if stale
+            s_last_activity_us = esp_timer_get_time();
             wifi_expected = true;
-            if (net_connect(8000) != ESP_OK) {
+            bool was_saving = s_wifi_saving;
+            s_wifi_saving = false;                     // battery saver: Wi-Fi back on
+            // Speech is buffered meanwhile, so the user doesn't have to wait.
+            if (net_connect(was_saving ? 15000 : 8000) != ESP_OK) {
                 ESP_LOGW(TAG, "no Wi-Fi");
                 set_light(LEDS_ERROR, PROMPT_NO_INTERNET);
                 back_to_listening();
                 break;
             }
             was_online = true;
+            net_power_save(false);                     // full-speed radio for smooth audio
             if (!settings_has_api_key()) {
                 set_light(LEDS_SETUP_NEEDED, PROMPT_NEED_API_KEY);
                 back_to_listening();
@@ -440,11 +490,6 @@ void app_main(void)
             gemini_live_stop();
             diag_set_status("gemini", "idle (last conversation ended normally)");
             ESP_LOGI(TAG, "conversation ended");
-#if CONFIG_VA_WIFI_OFF_WHEN_IDLE
-            wifi_expected = false;
-            net_disconnect();
-            was_online = false;
-#endif
             back_to_listening();
             break;
         case EV_SESSION_FAILED: {

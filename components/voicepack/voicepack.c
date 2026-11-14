@@ -278,10 +278,12 @@ static void speakerize(int16_t *pcm, size_t n)
     const float fs = OUT_RATE, pi = 3.14159265f;
     // 2nd-order Butterworth high-pass at 150 Hz (RBJ, Q = 0.7071)
     float w0 = 2 * pi * 150 / fs, al = sinf(w0) / (2 * 0.7071f), c = cosf(w0), a0 = 1 + al;
-    biquad_t hp = { (1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0 };
+    biquad_t hp = { .b0 = (1 + c) / 2 / a0, .b1 = -(1 + c) / a0, .b2 = (1 + c) / 2 / a0,
+                    .a1 = -2 * c / a0, .a2 = (1 - al) / a0 };
     // +3 dB peaking EQ at 3 kHz, Q = 1
     float A = powf(10, 3.0f / 40), w1 = 2 * pi * 3000 / fs, al1 = sinf(w1) / 2, c1 = cosf(w1), d0 = 1 + al1 / A;
-    biquad_t pk = { (1 + al1 * A) / d0, -2 * c1 / d0, (1 - al1 * A) / d0, -2 * c1 / d0, (1 - al1 / A) / d0 };
+    biquad_t pk = { .b0 = (1 + al1 * A) / d0, .b1 = -2 * c1 / d0, .b2 = (1 - al1 * A) / d0,
+                    .a1 = -2 * c1 / d0, .a2 = (1 - al1 / A) / d0 };
 
     float *f = heap_caps_malloc(n * sizeof(float), MALLOC_CAP_SPIRAM);
     if (!f) return;

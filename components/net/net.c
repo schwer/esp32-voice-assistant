@@ -91,7 +91,9 @@ esp_err_t net_init(void)
     // Networks saved by older firmware: prefer the strongest access point too.
     wifi_config_t saved = {0};
     if (esp_wifi_get_config(WIFI_IF_STA, &saved) == ESP_OK && saved.sta.ssid[0] &&
-        (saved.sta.scan_method != WIFI_ALL_CHANNEL_SCAN || saved.sta.sort_method != WIFI_CONNECT_AP_BY_SIGNAL)) {
+        (saved.sta.scan_method != WIFI_ALL_CHANNEL_SCAN || saved.sta.sort_method != WIFI_CONNECT_AP_BY_SIGNAL ||
+         saved.sta.listen_interval != 3)) {
+        saved.sta.listen_interval = 3;
         saved.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
         saved.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
         esp_wifi_set_config(WIFI_IF_STA, &saved);
@@ -144,6 +146,7 @@ esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms)
     strlcpy((char *)c.sta.password, password, sizeof(c.sta.password));
     c.sta.threshold.authmode = password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
+    c.sta.listen_interval = 3;                        // doze up to 3 beacons when idle
     c.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;        // several access points can share a name:
     c.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;    // join the strongest, not the first found
     c.sta.pmf_cfg.capable = true;                    // allow WPA2/WPA3 mixed networks
@@ -310,4 +313,9 @@ void net_saved_ssid(char *buf, size_t len)
     } else {
         buf[0] = 0;
     }
+}
+
+void net_power_save(bool idle)
+{
+    if (s_started) esp_wifi_set_ps(idle ? WIFI_PS_MAX_MODEM : WIFI_PS_NONE);
 }

@@ -28,3 +28,5 @@ void battery_tick(void);
  * trend, estimated time left, and what can be said about its health.
  */
 cJSON *battery_report(void);
+/** True when running from the battery (discharging), false on USB power or with no battery. */
+bool battery_on_battery(void);

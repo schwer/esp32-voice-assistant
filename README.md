@@ -21,7 +21,8 @@ There's no phone app and no cloud backend of your own.
 - **Google Search** grounding for current information (when the model supports it)
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
   hear the saved ones newest first and say "that one"
-- Wake word with Wi-Fi off between conversations, for battery operation. See [docs/power.md](docs/power.md).
+- **Battery saver**: on battery, Wi-Fi turns off after 3 quiet minutes and back on at "Jarvis"
+  (your first words are buffered meanwhile); the radio dozes whenever idle. See [docs/power.md](docs/power.md).
 - Local setup page at `http://assistant.local`, with a diagnostics page at `/diag`
 - `.ics` export of appointments
 - Optional account integrations (Google Calendar, IMAP, CalDAV, Outlook), authorized on your LAN.

@@ -15,7 +15,7 @@ static bool s_spoken = true;
 static char s_model[SETTINGS_MODEL_MAX];
 static char s_voice[SETTINGS_VOICE_MAX];
 static char s_location[SETTINGS_LOCATION_MAX];
-static bool s_fahrenheit, s_search = true;
+static bool s_fahrenheit, s_search = true, s_saver = true;
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
 {
@@ -49,6 +49,9 @@ esp_err_t settings_init(void)
     uint8_t search = 1;
     nvs_get_u8(h, "search", &search);
     s_search = search != 0;
+    uint8_t saver = 1;
+    nvs_get_u8(h, "saver", &saver);
+    s_saver = saver != 0;
     uint8_t spoken = 1;
     nvs_get_u8(h, "spoken", &spoken);
     s_spoken = spoken != 0;
@@ -145,5 +148,13 @@ esp_err_t settings_set_search(bool on)
 {
     esp_err_t err = save_u8("search", on);
     if (err == ESP_OK) s_search = on;
+    return err;
+}
+
+bool settings_get_battery_saver(void) { return s_saver; }
+esp_err_t settings_set_battery_saver(bool on)
+{
+    esp_err_t err = save_u8("saver", on);
+    if (err == ESP_OK) s_saver = on;
     return err;
 }

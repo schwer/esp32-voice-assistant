@@ -222,18 +222,34 @@ cJSON *diag_snapshot(void)
     }
     cJSON_AddNumberToObject(st, "saved_conversations", conversations_count());
 
-    // Battery
+    // Battery: what the assistant reports (level, trend, time left, health) + raw pins.
     battery_status_t bat;
     battery_read(&bat);
+    cJSON *rep = battery_report();
     cJSON *b = add_obj(root, "battery");
-    cJSON_AddBoolToObject(b, "detected", bat.present);
-    if (bat.present) {
-        char v[16];
-        snprintf(v, sizeof(v), "%.2f V", bat.volts);
-        cJSON_AddNumberToObject(b, "percent", bat.percent);
+    bool present = cJSON_IsTrue(cJSON_GetObjectItem(rep, "battery_connected"));
+    if (present) {
+        char v[48];
+        snprintf(v, sizeof(v), "%d%%", (int)cJSON_GetNumberValue(cJSON_GetObjectItem(rep, "percent")));
+        cJSON_AddStringToObject(b, "level", v);
+        snprintf(v, sizeof(v), "%s V", cJSON_GetStringValue(cJSON_GetObjectItem(rep, "voltage")));
         cJSON_AddStringToObject(b, "voltage", v);
+        const char *trend = cJSON_GetStringValue(cJSON_GetObjectItem(rep, "trend"));
+        if (trend) cJSON_AddStringToObject(b, "status", trend);
+        cJSON *hl = cJSON_GetObjectItem(rep, "estimated_hours_left");
+        if (cJSON_IsNumber(hl)) {
+            snprintf(v, sizeof(v), "about %.1f hours", hl->valuedouble);
+            cJSON_AddStringToObject(b, "time_left", v);
+        }
+        const char *health = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(rep, "health"), "assessment"));
+        if (health) cJSON_AddStringToObject(b, "health", health);
         cJSON_AddNumberToObject(b, "sense_pin", bat.gpio);
+    } else {
+        cJSON_AddStringToObject(b, "level", "unknown");
+        cJSON_AddStringToObject(b, "status", "No battery reading. If a battery is connected, send the two pin "
+                                              "readings below to the developer.");
     }
+    cJSON_Delete(rep);
     char pv[24];
     snprintf(pv, sizeof(pv), "%.0f mV", bat.pin_mv[0]);
     cJSON_AddStringToObject(b, "GPIO1 reading", pv);
