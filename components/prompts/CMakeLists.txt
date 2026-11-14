@@ -14,5 +14,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_REQUIRES audio settings esp_hw_support
     EMBED_FILES ${clip_files}
-    EMBED_TXTFILES "${CMAKE_CURRENT_LIST_DIR}/../../tools/prompts.tsv"
+    EMBED_TXTFILES "${CMAKE_CURRENT_LIST_DIR}/../../tools/prompts.tsv" "clips/voice.txt"
 )

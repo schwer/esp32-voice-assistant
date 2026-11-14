@@ -32,7 +32,9 @@ typedef enum {
 #include <stdbool.h>
 #include <stddef.h>
 
-/** Where lines recorded in Gemini's voice are stored (16 kHz mono s16le, one file per id). */
+#include <stdint.h>
+
+/** Lines recorded on the device live in PROMPTS_RECORDED_DIR/<Voice>/<id>.ulaw (16 kHz µ-law). */
 #define PROMPTS_RECORDED_DIR "/data/voice"
 
 /** Start the prompt player (needs audio_init() to have succeeded). */
@@ -46,9 +48,13 @@ const char *prompts_id(prompt_t p);
 const char *prompts_text(prompt_t p);
 /** The whole embedded phrase list (for detecting when it changes). */
 const char *prompts_list_raw(size_t *len);
-/** Prefer recordings in PROMPTS_RECORDED_DIR (falls back to built-in per line). */
-void prompts_use_recorded(bool on);
-void prompts_recorded_path(prompt_t p, char *buf, size_t len);
+/** Voice the built-in clips were recorded in (e.g. "Puck"). */
+const char *prompts_builtin_voice(void);
+/** Play recordings from this directory (a complete set), or NULL for the built-in clips. */
+void prompts_set_recorded_dir(const char *dir);
+void prompts_recorded_path(const char *dir, prompt_t p, char *buf, size_t len);
+uint8_t prompts_ulaw_encode(int16_t pcm);
+int16_t prompts_ulaw_decode(uint8_t u);
 
 /** True if the line will play from a recording in Gemini's voice (else built-in). */
 bool prompts_is_recorded(prompt_t p);

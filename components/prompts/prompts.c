@@ -97,8 +97,12 @@ extern const char tsv_start[] asm("_binary_prompts_tsv_start");
 extern const char tsv_end[]   asm("_binary_prompts_tsv_end");
 static char *s_text[PROMPT_COUNT];
 
+extern const char builtin_voice_start[] asm("_binary_voice_txt_start");
+extern const char builtin_voice_end[]   asm("_binary_voice_txt_end");
+static char s_builtin_voice[48];
+
 static QueueHandle_t s_queue;
-static volatile bool s_use_recorded;
+static char s_recorded_dir[64];                    // "" = built-in clips
 
 static void parse_tsv(void)
 {
@@ -121,18 +125,57 @@ static void parse_tsv(void)
 const char *prompts_id(prompt_t p)   { return p < PROMPT_COUNT ? IDS[p] : ""; }
 const char *prompts_text(prompt_t p) { return p < PROMPT_COUNT && s_text[p] ? s_text[p] : ""; }
 const char *prompts_list_raw(size_t *len) { *len = tsv_end - tsv_start; return tsv_start; }
-void prompts_use_recorded(bool on)   { s_use_recorded = on; }
 
-void prompts_recorded_path(prompt_t p, char *buf, size_t len)
+const char *prompts_builtin_voice(void)
 {
-    snprintf(buf, len, PROMPTS_RECORDED_DIR "/%s.pcm", prompts_id(p));
+    if (!s_builtin_voice[0]) {
+        size_t n = builtin_voice_end - builtin_voice_start;
+        if (n >= sizeof(s_builtin_voice)) n = sizeof(s_builtin_voice) - 1;
+        memcpy(s_builtin_voice, builtin_voice_start, n);
+        s_builtin_voice[n] = 0;
+        s_builtin_voice[strcspn(s_builtin_voice, "\r\n")] = 0;
+    }
+    return s_builtin_voice;
+}
+
+void prompts_set_recorded_dir(const char *dir)
+{
+    strlcpy(s_recorded_dir, dir ? dir : "", sizeof(s_recorded_dir));
+}
+
+void prompts_recorded_path(const char *dir, prompt_t p, char *buf, size_t len)
+{
+    snprintf(buf, len, "%s/%s.ulaw", dir, prompts_id(p));
+}
+
+// G.711 µ-law: recorded lines are stored at 8 bits per sample to fit two voices.
+uint8_t prompts_ulaw_encode(int16_t pcm)
+{
+    const int BIAS = 0x84, CLIP = 32635;
+    int sign = (pcm >> 8) & 0x80, v = pcm;
+    if (sign) v = -v;
+    if (v > CLIP) v = CLIP;
+    v += BIAS;
+    int exp = 7;
+    for (int mask = 0x4000; (v & mask) == 0 && exp > 0; mask >>= 1) exp--;
+    int mant = (v >> (exp + 3)) & 0x0F;
+    return (uint8_t)~(sign | (exp << 4) | mant);
+}
+
+int16_t prompts_ulaw_decode(uint8_t u)
+{
+    u = ~u;
+    int sign = u & 0x80, exp = (u >> 4) & 0x07, mant = u & 0x0F;
+    int v = ((mant << 3) + 0x84) << exp;
+    v -= 0x84;
+    return (int16_t)(sign ? -v : v);
 }
 
 bool prompts_is_recorded(prompt_t p)
 {
-    if (!s_use_recorded || p >= PROMPT_COUNT) return false;
-    char path[64];
-    prompts_recorded_path(p, path, sizeof(path));
+    if (!s_recorded_dir[0] || p >= PROMPT_COUNT) return false;
+    char path[96];
+    prompts_recorded_path(s_recorded_dir, p, path, sizeof(path));
     FILE *f = fopen(path, "rb");
     if (f) fclose(f);
     return f != NULL;
@@ -141,15 +184,17 @@ bool prompts_is_recorded(prompt_t p)
 /** Play a recording made in Gemini's voice, if there is one. */
 static bool play_recorded(prompt_t p)
 {
-    if (!s_use_recorded) return false;
-    char path[64];
-    prompts_recorded_path(p, path, sizeof(path));
+    if (!s_recorded_dir[0]) return false;
+    char path[96];
+    prompts_recorded_path(s_recorded_dir, p, path, sizeof(path));
     FILE *f = fopen(path, "rb");
     if (!f) return false;
-    static int16_t chunk[1024];
+    static uint8_t enc[1024];
+    static int16_t pcm[1024];
     size_t n, total = 0;
-    while ((n = fread(chunk, sizeof(int16_t), 1024, f)) > 0) {
-        audio_play_16k(chunk, n);
+    while ((n = fread(enc, 1, sizeof(enc), f)) > 0) {
+        for (size_t i = 0; i < n; i++) pcm[i] = prompts_ulaw_decode(enc[i]);
+        audio_play_16k(pcm, n);
         total += n;
     }
     fclose(f);
@@ -165,7 +210,7 @@ static void prompts_task(void *arg)
         if (play_recorded(p)) continue;
         const int16_t *pcm = (const int16_t *)CLIPS[p].start;
         size_t samples = (size_t)(CLIPS[p].end - CLIPS[p].start) / sizeof(int16_t);
-        ESP_LOGI(TAG, "say %s (built-in, %.1f s)", IDS[p], samples / 16000.0f);
+        ESP_LOGI(TAG, "say %s (built-in %s, %.1f s)", IDS[p], prompts_builtin_voice(), samples / 16000.0f);
         audio_play_16k(pcm, samples);
     }
 }

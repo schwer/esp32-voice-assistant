@@ -6,6 +6,7 @@
 #include "appointments.h"
 #include "conversations.h"
 #include "weather.h"
+#include "battery.h"
 #include "settings.h"
 
 static const char *TAG = "tools";
@@ -81,6 +82,12 @@ cJSON *tools_declarations(void)
           "Place name, e.g. 'Chicago' or 'Paris, France'. Omit for the user's home location.");
     param(props, "days", "INTEGER", "Forecast days, 1 (today) to 7. Default 1.");
 
+    function(decls, "get_battery_status",
+             "The device's own battery: charge level, voltage, whether it's charging, estimated "
+             "time left and what can be said about battery health. Use for any question about "
+             "your battery, power, charging or how long you'll last.",
+             NULL, NULL, 0);
+
     function(decls, "end_conversation",
              "End the conversation. Call after saying a short goodbye, when the user says "
              "goodbye or that they're done.",
@@ -111,6 +118,9 @@ const char *tools_system_instruction(void)
         "- After load_conversation, say in one sentence where you left off, then continue the "
         "conversation as if it never stopped. Saving again updates the same saved conversation.\n"
         "- Never read ids aloud.\n"
+        "Battery: use get_battery_status for questions about your battery. Give the percentage "
+        "and, if known, whether you're charging and roughly how long you'll last. Be honest that "
+        "health is an estimate from voltage.\n"
         "Weather: use get_weather. Without a place it uses the user's home location. Give the "
         "temperature as a whole number and mention rain or snow chances only when relevant.\n";
 }
@@ -134,6 +144,9 @@ cJSON *tools_handle_call(const char *name, const cJSON *args)
 {
     ESP_LOGI(TAG, "tool call: %s", name);
 
+    if (strcmp(name, "get_battery_status") == 0) {
+        return battery_report();
+    }
     if (strcmp(name, "get_weather") == 0) {
         const char *loc = arg_str(args, "location");
         int days = arg_int(args, "days");

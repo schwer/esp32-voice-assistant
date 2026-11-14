@@ -4,6 +4,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "esp_timer.h"
 #include "battery.h"
 
 static const char *TAG = "battery";
@@ -99,4 +100,100 @@ void battery_read(battery_status_t *out)
         ESP_LOGI(TAG, "GPIO1 %.0f mV, GPIO8 %.0f mV -> %s", out->pin_mv[0], out->pin_mv[1],
                  out->present ? "battery found" : "no battery reading");
     }
+}
+
+// ---------------------------------------------------------------- history
+
+#define HIST_MINUTES 120                 // one averaged reading per minute, last two hours
+static float s_hist[HIST_MINUTES];
+static int s_hist_len, s_hist_pos;
+static float s_minute_sum;
+static int s_minute_n;
+static int64_t s_minute_start_us;
+static float s_max_full_v;               // highest voltage seen (full-charge indicator)
+static int64_t s_on_battery_since_us;    // when it last started discharging (0 = unknown)
+
+void battery_tick(void)
+{
+    battery_status_t b;
+    battery_read(&b);
+    if (!b.present) return;
+    if (b.volts > s_max_full_v) s_max_full_v = b.volts;
+
+    int64_t now = esp_timer_get_time();
+    if (!s_minute_start_us) s_minute_start_us = now;
+    s_minute_sum += b.volts;
+    s_minute_n++;
+    if (now - s_minute_start_us >= 60LL * 1000000) {
+        s_hist[s_hist_pos] = s_minute_sum / s_minute_n;
+        s_hist_pos = (s_hist_pos + 1) % HIST_MINUTES;
+        if (s_hist_len < HIST_MINUTES) s_hist_len++;
+        s_minute_sum = 0;
+        s_minute_n = 0;
+        s_minute_start_us = now;
+    }
+}
+
+/** Voltage change per hour over the last `minutes` (needs history). */
+static bool slope_v_per_hour(int minutes, float *out)
+{
+    if (s_hist_len < 6) return false;
+    if (minutes > s_hist_len) minutes = s_hist_len;
+    float newest = s_hist[(s_hist_pos - 1 + HIST_MINUTES) % HIST_MINUTES];
+    float oldest = s_hist[(s_hist_pos - minutes + HIST_MINUTES) % HIST_MINUTES];
+    *out = (newest - oldest) * 60.0f / (minutes - 1);
+    return true;
+}
+
+cJSON *battery_report(void)
+{
+    cJSON *r = cJSON_CreateObject();
+    battery_status_t b;
+    battery_read(&b);
+    if (!b.present) {
+        cJSON_AddBoolToObject(r, "battery_connected", false);
+        cJSON_AddStringToObject(r, "note", "No battery reading: the board is probably running on USB "
+                                           "power without a battery, or battery sensing isn't working.");
+        return r;
+    }
+    char v[16];
+    cJSON_AddBoolToObject(r, "battery_connected", true);
+    cJSON_AddNumberToObject(r, "percent", b.percent);
+    snprintf(v, sizeof(v), "%.2f", b.volts);
+    cJSON_AddStringToObject(r, "voltage", v);
+
+    float slope;
+    int64_t now = esp_timer_get_time();
+    if (slope_v_per_hour(30, &slope)) {
+        const char *trend = slope > 0.02f ? "charging"
+                          : b.volts >= 4.15f && slope > -0.01f ? "full or on USB power"
+                          : slope < -0.005f ? "discharging" : "steady";
+        cJSON_AddStringToObject(r, "trend", trend);
+        if (slope < -0.005f) {
+            if (!s_on_battery_since_us) s_on_battery_since_us = now - 30LL * 60 * 1000000;
+            // Rough: the usable range is about 4.2 V down to 3.3 V.
+            float hours = (b.volts - 3.3f) / -slope;
+            if (hours > 0 && hours < 100) cJSON_AddNumberToObject(r, "estimated_hours_left", (int)(hours * 10 + 0.5f) / 10.0);
+        } else {
+            s_on_battery_since_us = 0;
+        }
+        snprintf(v, sizeof(v), "%+.3f", slope);
+        cJSON_AddStringToObject(r, "voltage_change_per_hour", v);
+    } else {
+        cJSON_AddStringToObject(r, "trend", "not enough history yet (needs a few minutes after startup)");
+    }
+
+    // Health: without a fuel-gauge chip the device can't measure capacity directly.
+    cJSON *h = cJSON_AddObjectToObject(r, "health");
+    snprintf(v, sizeof(v), "%.2f", s_max_full_v);
+    cJSON_AddStringToObject(h, "highest_voltage_seen", v);
+    const char *assessment;
+    if (s_max_full_v >= 4.12f) assessment = "Reaches a normal full-charge voltage, which is consistent with a healthy cell.";
+    else if (s_max_full_v >= 4.0f) assessment = "Hasn't reached full-charge voltage since startup; charge it fully to judge its health.";
+    else assessment = "Only partly charged since startup, so its health can't be judged yet.";
+    cJSON_AddStringToObject(h, "assessment", assessment);
+    cJSON_AddStringToObject(h, "limits", "This board has no fuel-gauge chip, so capacity and wear are estimates "
+                                          "from voltage only. A battery that drains much faster than before is wearing out.");
+    cJSON_AddNumberToObject(r, "uptime_minutes", (int)(now / 60000000));
+    return r;
 }

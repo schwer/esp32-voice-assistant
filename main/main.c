@@ -190,6 +190,7 @@ static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 static void check_battery(void)
 {
     static bool warned_low, warned_critical;
+    battery_tick();                                    // history for get_battery_status
     battery_status_t b;
     battery_read(&b);
     char s[48];
@@ -214,9 +215,11 @@ static void check_battery(void)
 }
 
 /**
- * After the voice is changed on the setup page, record the device's lines in the
- * new voice (in the background, only while online and idle). Retries failures
- * every 10 minutes and resumes after being interrupted by the wake word.
+ * One voice everywhere: when the device's messages aren't in the selected voice
+ * (first setup, or after a voice change) or a re-record was requested, record them
+ * with Gemini in the background, only while online and idle. The new set is switched
+ * in together with the conversation voice once complete. Failures retry after 10
+ * minutes; a wake word pauses recording, which resumes afterwards.
  */
 static void check_voicepack(void)
 {
@@ -254,7 +257,7 @@ static esp_err_t start_session(bool google_search, bool retry)
     gemini_live_config_t cfg = {
         .api_key = key,
         .model = settings_get_model(),
-        .voice = settings_get_voice(),
+        .voice = voicepack_conversation_voice(),    // same voice as the device's messages
         .system_instruction = instruction,
         .tools = tools_declarations(),
         .tool_handler = tool_handler,

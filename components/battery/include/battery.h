@@ -7,6 +7,7 @@
 #pragma once
 #include <stdbool.h>
 #include "esp_err.h"
+#include "cJSON.h"
 
 typedef struct {
     bool present;          // a plausible lithium cell reading was found
@@ -20,3 +21,10 @@ typedef struct {
 esp_err_t battery_init(void);
 /** Take a reading (cheap; call every few seconds). */
 void battery_read(battery_status_t *out);
+/** Record a reading in the history (call every few seconds from one place). */
+void battery_tick(void);
+/**
+ * Everything known about the battery for the assistant: level, voltage, charging
+ * trend, estimated time left, and what can be said about its health.
+ */
+cJSON *battery_report(void);

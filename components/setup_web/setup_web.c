@@ -275,7 +275,14 @@ static esp_err_t get_root(httpd_req_t *req)
         send_escaped(req, cur_voice);
         SEND(req, "</option>");
     }
-    SEND(req, "</select><p class=note>Used in conversations. When you pick a different voice, the board also records its own messages (\"Yes?\", \"Settings saved\", ...) in it, so everything sounds the same.</p>");
+    SEND(req, "</select><p class=note>The board uses one voice for everything. After you pick a new one, it records its own messages (\"Yes?\", \"Settings saved\", ...) in it, then switches conversations and messages over together.</p>");
+    {
+        char vs[160];
+        voicepack_status(vs, sizeof(vs));
+        SEND(req, "<p class=note><strong>Now:</strong> ");
+        send_escaped(req, vs);
+        SEND(req, "</p>");
+    }
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
@@ -527,12 +534,18 @@ static esp_err_t get_messages_json(httpd_req_t *req)
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "id", prompts_id((prompt_t)i));
         cJSON_AddStringToObject(o, "text", prompts_text((prompt_t)i));
-        cJSON_AddStringToObject(o, "source", prompts_is_recorded((prompt_t)i) ? "recorded" : "built-in");
+        char src[64];
+        if (prompts_is_recorded((prompt_t)i)) snprintf(src, sizeof(src), "%s's voice", voicepack_active_voice());
+        else snprintf(src, sizeof(src), "built-in clip");
+        cJSON_AddStringToObject(o, "source", src);
         cJSON_AddItemToArray(list, o);
     }
     cJSON *r = cJSON_CreateObject();
     cJSON_AddItemToObject(r, "messages", list);
-    cJSON_AddStringToObject(r, "voice", settings_get_voice());
+    cJSON_AddStringToObject(r, "voice", voicepack_active_voice());
+    char vs[160];
+    voicepack_status(vs, sizeof(vs));
+    cJSON_AddStringToObject(r, "status", vs);
     return send_json(req, r);
 }
 
@@ -584,15 +597,17 @@ static esp_err_t post_play(httpd_req_t *req)
     return send_json(req, r);
 }
 
-static esp_err_t post_voice_reset(httpd_req_t *req)
+static esp_err_t post_voice_rerecord(httpd_req_t *req)
 {
     if (!diag_action_allowed(req)) return forbid(req);
-    esp_err_t err = voicepack_reset();
+    esp_err_t err = voicepack_rerecord();
     cJSON *r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", err == ESP_OK);
-    cJSON_AddStringToObject(r, "message", err == ESP_OK
-        ? "Restored the built-in voice clips. Every message now plays in the default voice."
-        : "Couldn't restore them right now. Try again in a moment.");
+    char msg[160];
+    snprintf(msg, sizeof(msg), "Recording every message again in %s's voice with Gemini. "
+             "It starts within a few seconds while the board is idle; the list below updates when it's done.",
+             settings_get_voice());
+    cJSON_AddStringToObject(r, "message", err == ESP_OK ? msg : "Couldn't start right now. Try again in a moment.");
     return send_json(req, r);
 }
 
@@ -651,7 +666,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
-        { .uri = "/diag/voice-reset", .method = HTTP_POST, .handler = post_voice_reset },
+        { .uri = "/diag/voice-record",.method = HTTP_POST, .handler = post_voice_rerecord },
         { .uri = "/diag/mic-test",    .method = HTTP_GET,  .handler = get_mic_test },
     };
     httpd_register_uri_handler(s_server, &root);
