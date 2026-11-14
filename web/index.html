@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Assistant Flasher</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <style>
+    :root {
+      --bg: #f7f7f5; --fg: #1d1d1b; --muted: #5f5f5a; --card: #ffffff;
+      --border: #e2e2dc; --accent: #2f6fde; --warn-bg: #fff6e0; --warn-fg: #6b4b00;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #161615; --fg: #ececea; --muted: #a3a39d; --card: #1f1f1e;
+        --border: #33332f; --accent: #7aa7ff; --warn-bg: #2e2716; --warn-fg: #f0d58c;
+      }
+    }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+           font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+    h1 { font-size: 1.6rem; margin: 0 0 4px; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 20px; margin: 24px 0; }
+    ol { padding-left: 1.2em; } li { margin: 6px 0; }
+    .warn { background: var(--warn-bg); color: var(--warn-fg);
+            border-radius: 8px; padding: 12px 14px; font-size: 0.95rem; }
+    esp-web-install-button { --esp-tools-button-color: var(--accent); }
+    code { font-size: 0.9em; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>ESP32 Voice Assistant</h1>
+  <p class="muted">Firmware __VERSION__ for the Waveshare ESP32-S3-AUDIO-Board</p>
+
+  <div class="card">
+    <esp-web-install-button manifest="manifest.json">
+      <span slot="unsupported" class="warn" style="display:block">
+        Your browser can't flash devices. Use desktop Chrome or Edge.
+      </span>
+      <span slot="not-allowed" class="warn" style="display:block">
+        Flashing needs a secure (https) page.
+      </span>
+    </esp-web-install-button>
+  </div>
+
+  <div class="card">
+    <strong>How to install</strong>
+    <ol>
+      <li>Connect the board to your computer with a USB-C data cable.</li>
+      <li>Click <em>Connect</em> and pick the board's serial port.</li>
+      <li>Choose <em>Install</em>. The first install erases the device.</li>
+      <li>When prompted, enter your Wi-Fi network (2.4 GHz).</li>
+      <li>Open the device's setup page to enter your Gemini API key and time zone.</li>
+    </ol>
+    <p class="muted">If the port doesn't appear, hold <strong>BOOT</strong>, press <strong>RESET</strong>,
+       then release <strong>BOOT</strong> and try again.</p>
+  </div>
+
+  <p class="muted">
+    Open source: <a href="https://github.com/schwer/esp32-voice-assistant">github.com/schwer/esp32-voice-assistant</a>.
+    Not affiliated with Google.
+  </p>
+</main>
+</body>
+</html>

@@ -1,0 +1,82 @@
+name: Build firmware
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4
+          target: esp32s3
+          # Build, then merge bootloader + partition table + app + speech models
+          # into one image that flashes at offset 0 (used by the web flasher).
+          command: >-
+            idf.py build &&
+            cd build &&
+            python -m esptool --chip esp32s3 merge_bin
+            -o esp32-voice-assistant-merged.bin @flash_args
+
+      - name: Collect firmware
+        run: |
+          mkdir -p out
+          sudo cp build/esp32-voice-assistant-merged.bin out/
+          sudo cp build/esp32-voice-assistant.bin out/esp32-voice-assistant-app.bin
+          sudo chown -R "$USER" out
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/
+          if-no-files-found: error
+
+  pages:
+    # Publish the web flasher with the latest firmware from main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: web/firmware
+
+      - name: Write manifest
+        run: |
+          VERSION="$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
+          sed "s/__VERSION__/${VERSION}/" web/manifest.template.json > web/manifest.json
+          rm web/manifest.template.json
+          sed -i "s/__VERSION__/${VERSION}/" web/index.html
+          cat web/manifest.json
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4
