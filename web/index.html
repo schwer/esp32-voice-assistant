@@ -54,10 +54,30 @@
       <li>Click <em>Connect</em> and pick the board's serial port.</li>
       <li>Choose <em>Install</em>. The first install erases the device.</li>
       <li>When prompted, enter your Wi-Fi network (2.4 GHz).</li>
-      <li>Open the device's setup page to enter your Gemini API key and time zone.</li>
+      <li>Open the device's setup page to enter your <a href="#api-key">Gemini API key</a> and time zone.</li>
     </ol>
     <p class="muted">If the port doesn't appear, hold <strong>BOOT</strong>, press <strong>RESET</strong>,
        then release <strong>BOOT</strong> and try again.</p>
+  </div>
+
+  <div class="card" id="api-key">
+    <strong>Get a Gemini API key</strong>
+    <p class="muted">The assistant talks to Google's Gemini Live API using your own key.
+       You pay Google directly for what you use. Nothing goes through us.</p>
+    <ol>
+      <li>Go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio → API keys</a>
+          and sign in with your Google account.</li>
+      <li>Click <em>Create API key</em>. If asked, let it create a new Google Cloud project.</li>
+      <li>Copy the key. It starts with <code>AIza</code>.</li>
+      <li>Open the device's setup page (the link shown after Wi-Fi setup, or
+          <code>http://assistant.local</code>) and paste the key there.</li>
+    </ol>
+    <p><strong>Free or paid?</strong> The free tier is enough to try things out, but it's rate-limited, and
+       Google may use free-tier conversations to improve its products. For everyday use at home,
+       turn on billing for the key's project in AI Studio. Short chats typically cost a cent or two.
+       See <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener">Gemini API pricing</a>.</p>
+    <p class="warn">Treat the key like a password. Only enter it on your own device's setup page, and
+       don't share it or post it online. If it leaks, delete it in AI Studio and create a new one.</p>
   </div>
 
   <p class="muted">
