@@ -584,6 +584,18 @@ static esp_err_t post_play(httpd_req_t *req)
     return send_json(req, r);
 }
 
+static esp_err_t post_voice_reset(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    esp_err_t err = voicepack_reset();
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", err == ESP_OK);
+    cJSON_AddStringToObject(r, "message", err == ESP_OK
+        ? "Restored the built-in voice clips. Every message now plays in the default voice."
+        : "Couldn't restore them right now. Try again in a moment.");
+    return send_json(req, r);
+}
+
 static void do_restart(TimerHandle_t t) { esp_restart(); }
 
 static esp_err_t post_reboot(httpd_req_t *req)
@@ -639,6 +651,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
+        { .uri = "/diag/voice-reset", .method = HTTP_POST, .handler = post_voice_reset },
         { .uri = "/diag/mic-test",    .method = HTTP_GET,  .handler = get_mic_test },
     };
     httpd_register_uri_handler(s_server, &root);

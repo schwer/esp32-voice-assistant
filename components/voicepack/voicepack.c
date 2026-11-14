@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -309,5 +310,30 @@ esp_err_t voicepack_start(void)
         s_busy = false;
         return ESP_ERR_NO_MEM;
     }
+    return ESP_OK;
+}
+
+esp_err_t voicepack_reset(void)
+{
+    if (s_busy) {
+        voicepack_abort();
+        for (int i = 0; i < 100 && s_busy; i++) vTaskDelay(pdMS_TO_TICKS(50));
+        if (s_busy) return ESP_ERR_TIMEOUT;
+    }
+    prompts_use_recorded(false);
+    DIR *d = opendir(PROMPTS_RECORDED_DIR);
+    if (d) {
+        struct dirent *e;
+        char path[300];
+        while ((e = readdir(d)) != NULL) {
+            if (e->d_name[0] == '.') continue;
+            snprintf(path, sizeof(path), PROMPTS_RECORDED_DIR "/%s", e->d_name);
+            remove(path);
+        }
+        closedir(d);
+    }
+    s_last_failed = false;
+    snprintf(s_state, sizeof(s_state), "built-in voice (change the voice on the setup page to record)");
+    ESP_LOGI(TAG, "recordings deleted; using the built-in clips");
     return ESP_OK;
 }

@@ -20,6 +20,8 @@ esp_err_t voicepack_start(void);
 bool voicepack_busy(void);
 /** Stop recording now (e.g. the user said "Jarvis"); it resumes later. */
 void voicepack_abort(void);
+/** Delete the recordings and go back to the built-in clips (stops any recording). */
+esp_err_t voicepack_reset(void);
 /** Human-readable state, e.g. "recorded in Puck" or "recording 7 of 21". */
 void voicepack_status(char *buf, size_t len);
 /** True if the last recording attempt failed (not interrupted). */
