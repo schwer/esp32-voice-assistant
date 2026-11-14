@@ -27,7 +27,11 @@ typedef enum {
     LEDS_EVENT_COUNT
 } leds_event_t;
 
+/** Called when the state actually changes (not for previews). Keep it quick. */
+typedef void (*leds_change_cb_t)(leds_state_t from, leds_state_t to);
+
 esp_err_t leds_init(void);
+void leds_on_change(leds_change_cb_t cb);
 void leds_set(leds_state_t state);
 leds_state_t leds_get(void);
 void leds_event(leds_event_t event);

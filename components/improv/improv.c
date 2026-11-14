@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,7 +25,8 @@ enum { STATE_READY = 0x02, STATE_PROVISIONING = 0x03, STATE_PROVISIONED = 0x04 }
 enum { ERR_NONE = 0x00, ERR_INVALID_RPC = 0x01, ERR_UNKNOWN_RPC = 0x02,
        ERR_UNABLE_TO_CONNECT = 0x03, ERR_UNKNOWN = 0xFF };
 enum { CMD_WIFI_SETTINGS = 0x01, CMD_GET_STATE = 0x02, CMD_GET_INFO = 0x03,
-       CMD_GET_NETWORKS = 0x04 };
+       CMD_GET_NETWORKS = 0x04,
+       CMD_VENDOR_STATUS = 0xF0 };   // ours: [ssid, setup URL, rssi], used by the install page
 
 static const uint8_t HEADER[6] = {'I', 'M', 'P', 'R', 'O', 'V'};
 #define VERSION 1
@@ -149,6 +152,32 @@ static void handle_rpc(port_t port, const uint8_t *d, uint8_t len)
             send_error(port, ERR_UNABLE_TO_CONNECT);
             send_state(port, STATE_READY);
         }
+        break;
+    }
+
+    case CMD_GET_NETWORKS: {
+        // One result per network: [ssid, rssi, "YES"/"NO" secured], then an empty result.
+        wifi_ap_record_t *aps = calloc(20, sizeof(*aps));
+        int n = aps ? net_scan(aps, 20) : 0;
+        for (int i = 0; i < n; i++) {
+            char rssi[8];
+            snprintf(rssi, sizeof(rssi), "%d", aps[i].rssi);
+            const char *s[] = { (const char *)aps[i].ssid, rssi,
+                                aps[i].authmode == WIFI_AUTH_OPEN ? "NO" : "YES" };
+            send_result(port, cmd, s, 3);
+        }
+        free(aps);
+        send_result(port, cmd, NULL, 0);
+        break;
+    }
+
+    case CMD_VENDOR_STATUS: {
+        char ssid[33], url[64] = "", rssi[8] = "";
+        net_current_ssid(ssid, sizeof(ssid));
+        net_device_url(url, sizeof(url));
+        if (ssid[0]) snprintf(rssi, sizeof(rssi), "%d", net_rssi());
+        const char *s[] = { ssid, url, rssi };
+        send_result(port, cmd, s, 3);
         break;
     }
 

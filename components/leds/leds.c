@@ -23,6 +23,9 @@ static volatile bool s_event_restart;
 static TimerHandle_t s_preview_timer;
 static leds_state_t s_preview_restore;
 static volatile bool s_previewing;
+static leds_change_cb_t s_on_change;
+
+void leds_on_change(leds_change_cb_t cb) { s_on_change = cb; }
 
 static const struct { const char *name, *desc; } STATES[LEDS_STATE_COUNT] = {
     [LEDS_OFF]          = { "off",          "Off: idle, waiting for \"Jarvis\"" },
@@ -237,12 +240,16 @@ esp_err_t leds_init(void)
 void leds_set(leds_state_t state)
 {
     if (state >= LEDS_STATE_COUNT) return;
+    leds_state_t from = leds_get();
     if (s_previewing) {
         s_preview_restore = state;     // apply once the preview ends
-        return;
+    } else {
+        s_state = state;
+        if (s_task) xTaskNotifyGive(s_task);
     }
-    s_state = state;
-    if (s_task) xTaskNotifyGive(s_task);
+    if (from != state && s_on_change) {
+        s_on_change(from, state);
+    }
 }
 
 leds_state_t leds_get(void)
@@ -261,7 +268,8 @@ void leds_event(leds_event_t event)
 static void preview_done(TimerHandle_t t)
 {
     s_previewing = false;
-    leds_set(s_preview_restore);
+    s_state = s_preview_restore;       // back to the real state, silently
+    if (s_task) xTaskNotifyGive(s_task);
 }
 
 bool leds_preview(const char *name)

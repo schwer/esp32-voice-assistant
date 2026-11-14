@@ -54,6 +54,35 @@ static leds_state_t idle_state(void)
     return (net_is_connected() && settings_has_api_key()) ? LEDS_OFF : LEDS_SETUP_NEEDED;
 }
 
+// ---- Say what a blinking light means -------------------------------------
+// Whenever the ring switches to a blinking pattern, the device explains it out loud.
+// Callers can give a more specific reason (e.g. "I lost the Wi-Fi connection").
+
+static volatile int s_light_reason = PROMPT_COUNT;   // PROMPT_COUNT = use the default
+
+static void set_light(leds_state_t state, prompt_t reason)
+{
+    s_light_reason = reason;
+    leds_set(state);
+    s_light_reason = PROMPT_COUNT;
+}
+
+static void on_light_change(leds_state_t from, leds_state_t to)
+{
+    prompt_t reason = (prompt_t)s_light_reason;
+    switch (to) {
+    case LEDS_SETUP_NEEDED:
+        prompts_say(reason != PROMPT_COUNT ? reason
+                    : net_is_connected() ? PROMPT_NEED_API_KEY : PROMPT_NEED_WIFI);
+        break;
+    case LEDS_ERROR:
+        prompts_say(reason != PROMPT_COUNT ? reason : PROMPT_ERROR);
+        break;
+    default:
+        break;      // steady patterns (listening, thinking, speaking) stay quiet
+    }
+}
+
 /** Wraps tool calls with light feedback (thinking, then saved/deleted). */
 static cJSON *tool_handler(const char *name, const cJSON *args)
 {
@@ -86,6 +115,7 @@ void app_main(void)
     if (leds_init() == ESP_OK) {
         leds_set(LEDS_CONNECTING);             // booting / joining Wi-Fi
     }
+    leds_on_change(on_light_change);
     setenv("TZ", settings_get_tz(), 1);
     tzset();
     // TODO: restore time from the PCF85063 RTC
@@ -127,11 +157,10 @@ void app_main(void)
         leds_set(LEDS_LISTENING);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    leds_set(idle_state());
-    // Say what the light means.
-    prompts_say(!online ? PROMPT_NEED_WIFI
-              : !settings_has_api_key() ? PROMPT_NEED_API_KEY
-              : PROMPT_READY);
+    leds_set(idle_state());                    // amber blink explains itself out loud
+    if (idle_state() == LEDS_OFF) {
+        prompts_say(PROMPT_READY);
+    }
     bool was_online = online;
     bool wifi_expected = true;                 // false while Wi-Fi is off to save battery
 
@@ -164,18 +193,23 @@ void app_main(void)
     for (;;) {
         app_event_t ev;
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            bool now_online = net_is_connected();
+            diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
+            prompt_t reason = PROMPT_COUNT;
+            if (wifi_expected && was_online && !now_online) {
+                reason = PROMPT_WIFI_LOST;
+            } else if (!was_online && now_online && settings_has_api_key()) {
+                prompts_say(PROMPT_WIFI_BACK);
+            }
             // Keep the idle light in sync with Wi-Fi / API key changes.
             leds_state_t cur = leds_get();
             if (cur == LEDS_OFF || cur == LEDS_SETUP_NEEDED) {
                 leds_state_t want = idle_state();
-                if (want != cur) leds_set(want);
-            }
-            bool now_online = net_is_connected();
-            diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
-            if (wifi_expected && was_online && !now_online) {
-                prompts_say(PROMPT_WIFI_LOST);
-            } else if (!was_online && now_online) {
-                prompts_say(settings_has_api_key() ? PROMPT_WIFI_BACK : PROMPT_NEED_API_KEY);
+                if (want != cur) {
+                    set_light(want, reason);
+                } else if (want == LEDS_SETUP_NEEDED && !was_online && now_online) {
+                    prompts_say(PROMPT_NEED_API_KEY);   // online now, still no key
+                }
             }
             was_online = now_online;
             static int ticks;
@@ -192,8 +226,7 @@ void app_main(void)
             wifi_expected = true;
             if (net_connect(8000) != ESP_OK) {
                 ESP_LOGW(TAG, "no Wi-Fi");
-                leds_set(LEDS_ERROR);
-                prompts_say(PROMPT_NO_INTERNET);
+                set_light(LEDS_ERROR, PROMPT_NO_INTERNET);
                 break;
             }
             was_online = true;
@@ -204,8 +237,7 @@ void app_main(void)
             cfg.on_state = on_gemini_state;
             cfg.system_instruction_extra = appointments_summary(14);
             if (gemini_live_start(&cfg) != ESP_OK) {
-                leds_set(LEDS_ERROR);
-                prompts_say(PROMPT_GEMINI_FAILED);
+                set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 wakeword_listen();
             }
             break;

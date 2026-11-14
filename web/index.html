@@ -3,87 +3,544 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Voice Assistant Flasher</title>
-  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <title>Voice Assistant Installer</title>
   <style>
     :root {
       --bg: #f7f7f5; --fg: #1d1d1b; --muted: #5f5f5a; --card: #ffffff;
-      --border: #e2e2dc; --accent: #2f6fde; --warn-bg: #fff6e0; --warn-fg: #6b4b00;
+      --border: #e2e2dc; --accent: #2f6fde; --on-accent: #ffffff;
+      --ok: #1d7a3a; --bad: #b3261e; --warn-bg: #fff6e0; --warn-fg: #6b4b00;
+      --track: #ecece7; --code: #f0f0ec;
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
         --bg: #161615; --fg: #ececea; --muted: #a3a39d; --card: #1f1f1e;
-        --border: #33332f; --accent: #7aa7ff; --warn-bg: #2e2716; --warn-fg: #f0d58c;
+        --border: #33332f; --accent: #7aa7ff; --on-accent: #10151f;
+        --ok: #7fd49a; --bad: #ff8a80; --warn-bg: #2e2716; --warn-fg: #f0d58c;
+        --track: #2a2a28; --code: #121211;
       }
     }
+    * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--fg);
            font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
     main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
     h1 { font-size: 1.6rem; margin: 0 0 4px; }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
     .muted { color: var(--muted); }
     .card { background: var(--card); border: 1px solid var(--border);
-            border-radius: 12px; padding: 20px; margin: 24px 0; }
+            border-radius: 12px; padding: 20px; margin: 20px 0; }
+    button { font: inherit; font-weight: 600; border-radius: 8px; cursor: pointer;
+             padding: 10px 18px; border: 1px solid var(--border);
+             background: var(--card); color: var(--fg); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    button.big { font-size: 1.1rem; padding: 14px 26px; }
+    button:disabled { opacity: .55; cursor: default; }
+    button.link { border: 0; background: none; color: var(--accent); padding: 0; font-weight: 500; }
+    #step { font-weight: 600; margin: 14px 0 0; min-height: 1.5em; }
+    .bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+    .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); }
+    .warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; padding: 12px 14px; }
+    label { display: block; font-weight: 600; margin: 14px 0 6px; }
+    input, select { width: 100%; padding: 10px 12px; font: inherit; color: var(--fg);
+                    background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--muted); }
+    pre { background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+          max-height: 260px; overflow: auto; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+          white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
     ol { padding-left: 1.2em; } li { margin: 6px 0; }
-    .warn { background: var(--warn-bg); color: var(--warn-fg);
-            border-radius: 8px; padding: 12px 14px; font-size: 0.95rem; }
-    esp-web-install-button { --esp-tools-button-color: var(--accent); }
-    code { font-size: 0.9em; }
     a { color: var(--accent); }
+    code { font-size: .9em; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
 <main>
   <h1>ESP32 Voice Assistant</h1>
-  <p class="muted">Firmware __VERSION__ for the Waveshare ESP32-S3-AUDIO-Board</p>
+  <p class="muted">Latest firmware: <span id="latest">__VERSION__</span> · Waveshare ESP32-S3-AUDIO-Board</p>
 
+  <p class="warn" id="unsupported" hidden>
+    This browser can't talk to USB devices. Use Chrome or Edge on a computer.
+  </p>
+
+  <!-- 1. Connect: installs or updates automatically -->
   <div class="card">
-    <esp-web-install-button manifest="manifest.json">
-      <span slot="unsupported" class="warn" style="display:block">
-        Your browser can't flash devices. Use desktop Chrome or Edge.
-      </span>
-      <span slot="not-allowed" class="warn" style="display:block">
-        Flashing needs a secure (https) page.
-      </span>
-    </esp-web-install-button>
+    <h2>Install or update</h2>
+    <p class="muted" style="margin-top:0">Plug the board in with a USB-C data cable, then click Connect.
+      The newest firmware installs automatically. Your Wi-Fi and settings are kept.</p>
+    <button class="primary big" id="connect">Connect</button>
+    <p id="step" aria-live="polite"></p>
+    <div class="bar" id="bar" hidden><div id="barfill"></div></div>
+    <p class="muted" id="porthelp" hidden>Don't see the board in the list? Hold <strong>BOOT</strong>,
+      press <strong>RESET</strong>, release <strong>BOOT</strong>, then click Connect again.</p>
   </div>
 
-  <div class="card">
-    <strong>How to install</strong>
-    <ol>
-      <li>Connect the board to your computer with a USB-C data cable.</li>
-      <li>Click <em>Connect</em> and pick the board's serial port.</li>
-      <li>Choose <em>Install</em>. The first install erases the device.</li>
-      <li>When prompted, enter your Wi-Fi network (2.4 GHz).</li>
-      <li>Open the device's setup page to enter your <a href="#api-key">Gemini API key</a> and time zone.</li>
-    </ol>
-    <p class="muted">If the port doesn't appear, hold <strong>BOOT</strong>, press <strong>RESET</strong>,
-       then release <strong>BOOT</strong> and try again.</p>
+  <!-- 2. Status: shown right after connecting -->
+  <div class="card" id="statusCard" hidden>
+    <h2>Your board</h2>
+    <dl>
+      <dt>Firmware</dt><dd id="sFw">-</dd>
+      <dt>Wi-Fi</dt><dd id="sWifi">-</dd>
+      <dt>Setup page</dt><dd id="sUrl">-</dd>
+    </dl>
+    <p class="muted" id="urlNote" hidden style="margin-bottom:0">Open the setup page from a phone or computer
+      on the same Wi-Fi network.</p>
+    <div class="row">
+      <button id="changeWifi">Change Wi-Fi</button>
+      <button id="refresh">Check again</button>
+    </div>
+  </div>
+
+  <!-- 3. Wi-Fi: networks the board can see, strongest first -->
+  <div class="card" id="wifiCard" hidden>
+    <h2>Connect the board to Wi-Fi</h2>
+    <p class="muted" style="margin-top:0">These are the networks the board can see. Pick the one this
+      computer uses (2.4 GHz only).</p>
+    <label for="ssid">Network</label>
+    <select id="ssid"></select>
+    <div id="otherWrap" hidden>
+      <label for="ssidOther">Network name</label>
+      <input id="ssidOther" autocomplete="off" spellcheck="false">
+    </div>
+    <label for="pass">Password</label>
+    <input id="pass" type="password" autocomplete="current-password">
+    <div class="row">
+      <button class="primary" id="saveWifi">Connect board</button>
+      <button id="rescan">Scan again</button>
+      <span id="wifiMsg" aria-live="polite"></span>
+    </div>
   </div>
 
   <div class="card" id="api-key">
-    <strong>Get a Gemini API key</strong>
-    <p class="muted">The assistant talks to Google's Gemini Live API using your own key.
-       You pay Google directly for what you use. Nothing goes through us.</p>
+    <h2>Get a Gemini API key</h2>
+    <p class="muted" style="margin-top:0">The assistant uses your own key with Google's Gemini Live API.
+      You pay Google directly. Nothing goes through us.</p>
     <ol>
       <li>Go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio → API keys</a>
-          and sign in with your Google account.</li>
+          and sign in.</li>
       <li>Click <em>Create API key</em>. If asked, let it create a new Google Cloud project.</li>
       <li>Copy the key. It starts with <code>AIza</code>.</li>
-      <li>Open the device's setup page (the link shown after Wi-Fi setup, or
-          <code>http://assistant.local</code>) and paste the key there.</li>
+      <li>Open the board's setup page (shown above after connecting) and paste the key there.</li>
     </ol>
-    <p><strong>Free or paid?</strong> The free tier is enough to try things out, but it's rate-limited, and
-       Google may use free-tier conversations to improve its products. For everyday use at home,
-       turn on billing for the key's project in AI Studio. Short chats typically cost a cent or two.
-       See <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener">Gemini API pricing</a>.</p>
-    <p class="warn">Treat the key like a password. Only enter it on your own device's setup page, and
-       don't share it or post it online. If it leaks, delete it in AI Studio and create a new one.</p>
+    <p><strong>Free or paid?</strong> The free tier is fine for trying it out, but it's rate-limited and
+      Google may use free-tier conversations to improve its products. For everyday use, turn on billing for
+      the key's project in AI Studio. Short chats typically cost a cent or two.
+      See <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener">Gemini API pricing</a>.</p>
+    <p class="warn" style="margin-bottom:0">Treat the key like a password. Only enter it on your own board's
+      setup page. If it leaks, delete it in AI Studio and create a new one.</p>
   </div>
 
-  <p class="muted">
-    Open source: <a href="https://github.com/schwer/esp32-voice-assistant">github.com/schwer/esp32-voice-assistant</a>.
-    Not affiliated with Google.
-  </p>
+  <div class="card">
+    <details>
+      <summary>Advanced</summary>
+      <div class="row">
+        <button id="reinstall">Erase everything and reinstall</button>
+      </div>
+      <p class="muted">Use this only if the board is stuck. It also deletes Wi-Fi, the API key and saved
+        conversations.</p>
+      <p class="muted">Prefer the standard installer? Use the <a href="classic.html">classic installer</a>.</p>
+    </details>
+    <details>
+      <summary>Board log</summary>
+      <pre id="log"></pre>
+    </details>
+  </div>
+
+  <p class="muted">Open source: <a href="https://github.com/schwer/esp32-voice-assistant">github.com/schwer/esp32-voice-assistant</a>.
+    Not affiliated with Google.</p>
 </main>
+
+<script type="module">
+// ---------------------------------------------------------------- helpers
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const LOG_MAX = 20000;
+function log(text) {
+  const el = $("log");
+  el.textContent = (el.textContent + text).slice(-LOG_MAX);
+  el.scrollTop = el.scrollHeight;
+}
+function step(text, cls = "") { $("step").textContent = text; $("step").className = cls; }
+function progress(fraction) {
+  $("bar").hidden = fraction == null;
+  $("barfill").style.width = `${Math.round((fraction || 0) * 100)}%`;
+}
+function store(key, value) { try { localStorage.setItem(key, value); } catch {} }
+function recall(key) { try { return localStorage.getItem(key); } catch { return null; } }
+
+// ---------------------------------------------------------------- Improv Wi-Fi serial
+// https://www.improv-wifi.com/serial/  (+ vendor command 0xF0: [ssid, setup URL, rssi])
+const HEADER = [73, 77, 80, 82, 79, 86]; // "IMPROV"
+const T_STATE = 1, T_ERROR = 2, T_RPC = 3, T_RESULT = 4;
+const CMD_WIFI = 1, CMD_STATE = 2, CMD_INFO = 3, CMD_SCAN = 4, CMD_STATUS = 0xF0;
+const ERRORS = { 1: "invalid request", 2: "unknown command", 3: "couldn't connect to that network", 255: "unknown error" };
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+class Improv {
+  constructor(port) { this.port = port; this.buf = []; this.listeners = new Set(); }
+
+  async open() {
+    await this.port.open({ baudRate: 115200 });
+    try { await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch {}
+    this.reader = this.port.readable.getReader();
+    this.writer = this.port.writable.getWriter();
+    this.closed = false;
+    this.loop = this.readLoop();
+  }
+
+  async close() {
+    this.closed = true;
+    try { await this.reader.cancel(); } catch {}
+    await this.loop?.catch(() => {});
+    try { this.reader.releaseLock(); } catch {}
+    try { this.writer.releaseLock(); } catch {}
+    try { await this.port.close(); } catch {}
+  }
+
+  async readLoop() {
+    while (!this.closed) {
+      const { value, done } = await this.reader.read();
+      if (done) break;
+      if (value) { this.buf.push(...value); this.parse(); }
+    }
+  }
+
+  parse() {
+    for (;;) {
+      const i = this.findHeader();
+      if (i < 0) {
+        // Keep a possible partial header at the end; the rest is log text.
+        const keep = Math.min(this.buf.length, 5);
+        if (this.buf.length > keep) log(dec.decode(new Uint8Array(this.buf.splice(0, this.buf.length - keep))));
+        return;
+      }
+      if (i > 0) log(dec.decode(new Uint8Array(this.buf.splice(0, i))));
+      if (this.buf.length < 9) return;
+      const len = this.buf[8];
+      if (this.buf.length < 10 + len) return;
+      const pkt = this.buf.splice(0, 10 + len);
+      const sum = pkt.slice(0, 9 + len).reduce((a, b) => (a + b) & 0xff, 0);
+      if (sum !== pkt[9 + len]) continue;
+      const msg = { type: pkt[7], data: pkt.slice(9, 9 + len) };
+      for (const fn of [...this.listeners]) fn(msg);
+    }
+  }
+
+  findHeader() {
+    outer: for (let i = 0; i + HEADER.length <= this.buf.length; i++) {
+      for (let j = 0; j < HEADER.length; j++) if (this.buf[i + j] !== HEADER[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
+
+  async send(type, data) {
+    const pkt = [...HEADER, 1, type, data.length, ...data];
+    pkt.push(pkt.reduce((a, b) => (a + b) & 0xff, 0));
+    pkt.push(10);
+    await this.writer.write(new Uint8Array(pkt));
+  }
+
+  static strings(data) {
+    const out = [];
+    for (let i = 2; i < data.length; ) { const n = data[i++]; out.push(dec.decode(new Uint8Array(data.slice(i, i + n)))); i += n; }
+    return out;
+  }
+
+  /** Send an RPC; resolve with the result's strings (or every result when multi). */
+  rpc(cmd, payload = [], { timeout = 3000, multi = false } = {}) {
+    return new Promise(async (resolve, reject) => {
+      const results = [];
+      const done = (fn, v) => { clearTimeout(timer); this.listeners.delete(onMsg); fn(v); };
+      const timer = setTimeout(() => done(reject, new Error("timeout")), timeout);
+      const onMsg = ({ type, data }) => {
+        if (type === T_ERROR && data[0]) return done(reject, new Error(ERRORS[data[0]] || "error"));
+        if (type !== T_RESULT || data[0] !== cmd) return;
+        const s = Improv.strings(data);
+        if (!multi) return done(resolve, s);
+        if (s.length === 0) return done(resolve, results);
+        results.push(s);
+      };
+      this.listeners.add(onMsg);
+      try { await this.send(T_RPC, [cmd, payload.length, ...payload]); } catch (e) { done(reject, e); }
+    });
+  }
+
+  /** Device info, retried while the board boots. null if it never answers. */
+  async info(waitMs) {
+    const until = Date.now() + waitMs;
+    while (Date.now() < until) {
+      try {
+        const [name, version, chip, device] = await this.rpc(CMD_INFO, [], { timeout: 1200 });
+        return { name, version, chip, device };
+      } catch {}
+    }
+    return null;
+  }
+
+  async status() {
+    try {
+      const [ssid, url, rssi] = await this.rpc(CMD_STATUS, [], { timeout: 2000 });
+      return { ssid, url, rssi: rssi ? Number(rssi) : null };
+    } catch { return null; }   // older firmware without the vendor command
+  }
+
+  async scan() {
+    const list = await this.rpc(CMD_SCAN, [], { timeout: 20000, multi: true });
+    return list.map(([ssid, rssi, secure]) => ({ ssid, rssi: Number(rssi), secure: secure === "YES" }));
+  }
+
+  /** Resolves with the setup URL once connected; rejects if the board can't join. */
+  provision(ssid, password) {
+    const s = enc.encode(ssid), p = enc.encode(password);
+    return this.rpc(CMD_WIFI, [s.length, ...s, p.length, ...p], { timeout: 40000 }).then((r) => r[0] || "");
+  }
+}
+
+// ---------------------------------------------------------------- flashing (esptool-js)
+let manifest;
+async function loadManifest() {
+  if (!manifest) manifest = await (await fetch("manifest.json", { cache: "no-store" })).json();
+  return manifest;
+}
+
+function isCurrent(info, m) {
+  if (!info || info.name !== m.name || !m.build) return false;
+  const a = info.version.toLowerCase(), b = m.build.toLowerCase();
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+async function flash(port, { eraseAll = false } = {}) {
+  const m = await loadManifest();
+  const { ESPLoader, Transport } = await import("./vendor/esptool-js-0.7.0/bundle.js");
+  step("Downloading firmware…");
+  progress(0);
+  const parts = m.builds[0].parts;
+  const files = [];
+  for (const p of parts) {
+    const res = await fetch(p.path, { cache: "no-store" });
+    if (!res.ok) throw new Error(`couldn't download ${p.path}`);
+    files.push({ address: p.offset, data: new Uint8Array(await res.arrayBuffer()) });
+  }
+  const total = files.reduce((n, f) => n + f.data.length, 0);
+  const offsets = files.map((_, i) => files.slice(0, i).reduce((n, f) => n + f.data.length, 0));
+
+  step("Preparing the board…");
+  const transport = new Transport(port, false);
+  const terminal = { clean() {}, writeLine: (s) => log(s + "\n"), write: (s) => log(s) };
+  const loader = new ESPLoader({ transport, baudrate: 460800, romBaudrate: 115200, terminal });
+  try {
+    const chip = await loader.main();
+    if (!/ESP32-S3/i.test(chip)) throw new Error(`this board is an ${chip}, not an ESP32-S3`);
+    step(eraseAll ? "Erasing and installing…" : "Installing the latest firmware…");
+    await loader.writeFlash({
+      fileArray: files, flashSize: "keep", flashMode: "keep", flashFreq: "keep",
+      eraseAll, compress: true,
+      reportProgress: (i, written, size) => {
+        const done = offsets[i] + (written / size) * files[i].data.length;
+        progress(done / total);
+        step(`Installing… ${Math.round((done / total) * 100)}%`);
+      },
+    });
+    step("Restarting the board…");
+    await loader.after("hard_reset");
+  } finally {
+    try { await transport.disconnect(); } catch {}
+    progress(null);
+  }
+}
+
+/** After a reset, native-USB boards briefly disappear. Find and open the port again. */
+async function reopen(oldPort, waitMs = 25000) {
+  const { usbVendorId, usbProductId } = oldPort.getInfo();
+  const until = Date.now() + waitMs;
+  while (Date.now() < until) {
+    const ports = await navigator.serial.getPorts();
+    const candidates = ports.filter((p) => {
+      const i = p.getInfo();
+      return i.usbVendorId === usbVendorId && i.usbProductId === usbProductId;
+    });
+    for (const p of candidates.length ? candidates : [oldPort]) {
+      const imp = new Improv(p);
+      try { await imp.open(); return imp; } catch { try { await p.close(); } catch {} }
+    }
+    await sleep(600);
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- UI flow
+let improv = null, port = null, busy = false;
+
+function signal(rssi) {
+  if (rssi == null || Number.isNaN(rssi)) return "";
+  return rssi >= -60 ? "strong signal" : rssi >= -70 ? "fair signal" : "weak signal";
+}
+
+function showStatus(info, st) {
+  $("statusCard").hidden = false;
+  const m = manifest;
+  const fw = $("sFw");
+  if (info) {
+    fw.textContent = `${info.version}${isCurrent(info, m) ? " (latest)" : ""}`;
+    fw.className = isCurrent(info, m) ? "ok" : "";
+  } else {
+    fw.textContent = "unknown"; fw.className = "";
+  }
+  const wifi = $("sWifi"), url = $("sUrl");
+  url.replaceChildren();
+  if (st && st.ssid) {
+    wifi.textContent = `${st.ssid} · ${signal(st.rssi)}`;
+    wifi.className = "ok";
+    const a = document.createElement("a");
+    a.href = st.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = st.url;
+    url.append(a);
+    $("urlNote").hidden = false;
+  } else {
+    wifi.textContent = "not connected"; wifi.className = "bad";
+    url.textContent = "available once the board is on Wi-Fi";
+    $("urlNote").hidden = true;
+  }
+}
+
+async function showWifiForm() {
+  $("wifiCard").hidden = false;
+  const sel = $("ssid");
+  sel.replaceChildren(new Option("Scanning for networks…", ""));
+  sel.disabled = true;
+  $("wifiMsg").textContent = "";
+  let nets = [];
+  try { nets = await improv.scan(); } catch (e) { log(`scan failed: ${e.message}\n`); }
+  sel.replaceChildren();
+  for (const n of nets) {
+    const o = new Option(`${n.ssid}  (${signal(n.rssi)}${n.secure ? "" : ", open"})`, n.ssid);
+    sel.append(o);
+  }
+  sel.append(new Option("Other network…", "__other__"));
+  const last = recall("va.lastSsid");
+  if (last && nets.some((n) => n.ssid === last)) sel.value = last;   // the one used last time
+  else if (nets.length) sel.value = nets[0].ssid;                       // otherwise the strongest
+  else sel.value = "__other__";
+  sel.disabled = false;
+  sel.dispatchEvent(new Event("change"));
+  $("pass").focus();
+}
+
+$("ssid").addEventListener("change", () => { $("otherWrap").hidden = $("ssid").value !== "__other__"; });
+
+async function refreshStatus() {
+  const info = await improv.info(4000);
+  const st = await improv.status();
+  showStatus(info, st);
+  return { info, st };
+}
+
+async function start({ eraseAll = false } = {}) {
+  if (busy) return;
+  busy = true;
+  $("connect").disabled = $("reinstall").disabled = true;
+  $("porthelp").hidden = true;
+  try {
+    if (!port) {
+      try { port = await navigator.serial.requestPort(); }
+      catch { step(""); $("porthelp").hidden = false; return; }
+    }
+    if (improv) { await improv.close(); improv = null; }
+    await loadManifest();
+
+    step("Talking to the board…");
+    improv = new Improv(port);
+    await improv.open();
+    const info = eraseAll ? null : await improv.info(3500);
+
+    if (!eraseAll && isCurrent(info, manifest)) {
+      step("The board already has the latest firmware.", "ok");
+    } else {
+      step(info ? `Updating from ${info.version}…` : "Installing…");
+      await improv.close(); improv = null;
+      await flash(port, { eraseAll });
+      step("Waiting for the board to start…");
+      improv = await reopen(port);
+      if (!improv) throw new Error("the board didn't come back after restarting. Unplug it, plug it back in and click Connect");
+      port = improv.port;
+      const after = await improv.info(15000);
+      if (!after) throw new Error("the new firmware didn't respond. Check the board log below");
+      step(info ? "Updated to the latest firmware. Your settings were kept." : "Installed.", "ok");
+    }
+
+    const { st } = await refreshStatus();
+    if (!st || !st.ssid) await showWifiForm();
+    else $("wifiCard").hidden = true;
+  } catch (e) {
+    step(`Something went wrong: ${e.message}.`, "bad");
+    log(`\nerror: ${e.stack || e}\n`);
+  } finally {
+    busy = false;
+    $("connect").disabled = $("reinstall").disabled = false;
+    $("connect").textContent = "Connect again";
+  }
+}
+
+$("connect").onclick = () => { port = null; start(); };
+
+$("reinstall").onclick = () => {
+  if (confirm("Erase everything on the board (including Wi-Fi, API key and saved conversations) and reinstall?")) {
+    port = null; start({ eraseAll: true });
+  }
+};
+
+$("refresh").onclick = async () => {
+  if (!improv || busy) return;
+  busy = true;
+  try { await refreshStatus(); } finally { busy = false; }
+};
+
+$("changeWifi").onclick = () => { if (improv && !busy) showWifiForm(); };
+$("rescan").onclick = () => { if (improv && !busy) showWifiForm(); };
+
+$("saveWifi").onclick = async () => {
+  if (!improv || busy) return;
+  const ssid = $("ssid").value === "__other__" ? $("ssidOther").value.trim() : $("ssid").value;
+  if (!ssid) { $("wifiMsg").textContent = "Pick a network."; return; }
+  busy = true;
+  $("saveWifi").disabled = true;
+  $("wifiMsg").className = "muted";
+  $("wifiMsg").textContent = "Connecting… (up to 15 seconds)";
+  try {
+    await improv.provision(ssid, $("pass").value);
+    store("va.lastSsid", ssid);
+    $("pass").value = "";
+    $("wifiMsg").className = "ok";
+    $("wifiMsg").textContent = "Connected.";
+    await refreshStatus();
+    $("wifiCard").hidden = true;
+  } catch (e) {
+    $("wifiMsg").className = "bad";
+    $("wifiMsg").textContent = e.message === "timeout"
+      ? "The board didn't answer. Try again."
+      : `The board ${e.message}. Check the password and that it's a 2.4 GHz network.`;
+  } finally {
+    busy = false;
+    $("saveWifi").disabled = false;
+  }
+};
+
+if (!("serial" in navigator)) {
+  $("unsupported").hidden = false;
+  $("connect").disabled = $("reinstall").disabled = true;
+} else {
+  navigator.serial.addEventListener("disconnect", (ev) => {
+    if (!busy && ev.target === port) {
+      step("Board unplugged. Plug it back in and click Connect.", "bad");
+      improv = null; port = null;
+    }
+  });
+  loadManifest().then((m) => { $("latest").textContent = m.version; }).catch(() => {});
+}
+</script>
 </body>
 </html>

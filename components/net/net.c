@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -226,4 +227,67 @@ esp_err_t net_device_url(char *buf, size_t len)
     }
     snprintf(buf, len, "http://" IPSTR "/", IP2STR(&ip.ip));
     return ESP_OK;
+}
+
+static int cmp_rssi(const void *a, const void *b)
+{
+    return ((const wifi_ap_record_t *)b)->rssi - ((const wifi_ap_record_t *)a)->rssi;
+}
+
+int net_scan(wifi_ap_record_t *out, int max)
+{
+    // A scan can't run while the driver is busy retrying a connection.
+    bool was_wanted = s_want;
+    bool connected = net_is_connected();
+    if (!connected) {
+        s_want = false;
+        esp_timer_stop(s_retry_timer);
+        if (s_started) esp_wifi_disconnect();
+    }
+    if (!s_started) {
+        esp_wifi_start();
+        s_started = true;
+    }
+    wifi_scan_config_t cfg = { .show_hidden = false };
+    int n = 0;
+    if (esp_wifi_scan_start(&cfg, true) == ESP_OK) {
+        uint16_t count = 64;
+        wifi_ap_record_t *all = calloc(count, sizeof(*all));
+        if (all && esp_wifi_scan_get_ap_records(&count, all) == ESP_OK) {
+            qsort(all, count, sizeof(*all), cmp_rssi);
+            for (int i = 0; i < count && n < max; i++) {
+                if (!all[i].ssid[0]) continue;
+                bool dup = false;
+                for (int j = 0; j < n && !dup; j++) {
+                    dup = strcmp((char *)out[j].ssid, (char *)all[i].ssid) == 0;
+                }
+                if (!dup) out[n++] = all[i];
+            }
+        } else {
+            esp_wifi_clear_ap_list();
+        }
+        free(all);
+    }
+    if (!connected && was_wanted && net_has_credentials()) {
+        s_want = true;
+        s_attempts = 0;
+        esp_wifi_connect();
+    }
+    return n;
+}
+
+void net_current_ssid(char *buf, size_t len)
+{
+    wifi_ap_record_t ap;
+    if (net_is_connected() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        strlcpy(buf, (const char *)ap.ssid, len);
+    } else {
+        buf[0] = 0;
+    }
+}
+
+int net_rssi(void)
+{
+    wifi_ap_record_t ap;
+    return (net_is_connected() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
 }

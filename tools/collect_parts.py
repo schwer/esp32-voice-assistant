@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Copy flashable parts from an ESP-IDF build dir and describe them in parts.json.
+
+Usage: collect_parts.py <build_dir> <out_dir>
+"""
+import json
+import shutil
+import sys
+from pathlib import Path
+
+NVS_OFFSET = 0x9000
+NVS_END = 0xF000
+
+build, out = Path(sys.argv[1]), Path(sys.argv[2])
+out.mkdir(parents=True, exist_ok=True)
+args = json.loads((build / "flasher_args.json").read_text())
+
+parts = []
+for offset, rel in sorted(args["flash_files"].items(), key=lambda kv: int(kv[0], 16)):
+    src = build / rel
+    off = int(offset, 16)
+    end = off + src.stat().st_size
+    if off < NVS_END and end > NVS_OFFSET:
+        sys.exit(f"{rel} at {offset} overlaps the NVS partition; refusing to publish it")
+    shutil.copy(src, out / src.name)
+    parts.append({"path": f"firmware/{src.name}", "offset": off, "size": src.stat().st_size})
+    print(f"{offset:>10}  {src.name}  ({src.stat().st_size} bytes)")
+
+names = [Path(p["path"]).name for p in parts]
+if "srmodels.bin" not in names:
+    sys.exit("srmodels.bin (wake word model) missing from flash_files")
+(out / "parts.json").write_text(json.dumps(parts, indent=2))

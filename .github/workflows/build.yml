@@ -25,20 +25,15 @@ jobs:
         with:
           esp_idf_version: v5.5
           target: esp32s3
-          # Build, then merge bootloader + partition table + app + speech models
-          # into one image that flashes at offset 0 (used by the web flasher).
-          command: >-
-            idf.py build &&
-            cd build &&
-            python -m esptool --chip esp32s3 merge_bin
-            -o esp32-voice-assistant-merged.bin @flash_args
+          command: idf.py build
 
-      - name: Collect firmware
+      # Flash images are published as separate parts at their own offsets.
+      # Never as one merged image: that would also overwrite the NVS partition
+      # and wipe the user's Wi-Fi and API key on every update.
+      - name: Collect firmware parts
         run: |
-          mkdir -p out
-          sudo cp build/esp32-voice-assistant-merged.bin out/
-          sudo cp build/esp32-voice-assistant.bin out/esp32-voice-assistant-app.bin
-          sudo chown -R "$USER" out
+          sudo chown -R "$USER" build
+          python3 tools/collect_parts.py build out
           ls -la out
 
       - uses: actions/upload-artifact@v4
@@ -69,9 +64,8 @@ jobs:
       - name: Write manifest
         run: |
           VERSION="$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
-          sed "s/__VERSION__/${VERSION}/" web/manifest.template.json > web/manifest.json
-          rm web/manifest.template.json
-          sed -i "s/__VERSION__/${VERSION}/" web/index.html
+          python3 tools/write_manifest.py web/firmware/parts.json "$VERSION" "${GITHUB_SHA}" > web/manifest.json
+          sed -i "s/__VERSION__/${VERSION}/g" web/*.html
           cat web/manifest.json
 
       - uses: actions/configure-pages@v5
