@@ -41,7 +41,7 @@ static esp_websocket_client_handle_t s_ws;
 static SemaphoreHandle_t s_lock;                    // guards send buffers / preroll
 static volatile bool s_ready, s_active, s_closing;
 static volatile gemini_state_t s_state;
-static char s_error[96];
+static char s_error[128];
 static TaskHandle_t s_monitor;
 
 // upload
@@ -319,7 +319,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 reason[n] = 0;
             }
             if (!s_closing) {
-                char why[96];
+                char why[sizeof(reason) + 24];
                 snprintf(why, sizeof(why), "%s (code %d)", reason[0] ? reason : "server closed the session", code);
                 fail(why);
             }
