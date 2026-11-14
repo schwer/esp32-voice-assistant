@@ -162,15 +162,21 @@ static void send_setup(void)
     cJSON_AddItemToArray(parts, part);
 
     cJSON *tools = s_cfg.tools ? s_cfg.tools : cJSON_CreateArray();
-    s_cfg.tools = NULL;                              // now owned by root
+    s_cfg.tools = NULL;                              // now owned by root (or freed below)
     if (s_cfg.google_search) {
         cJSON *gs = cJSON_CreateObject();
         cJSON_AddObjectToObject(gs, "googleSearch");
         cJSON_AddItemToArray(tools, gs);
     }
-    cJSON_AddItemToObject(setup, "tools", tools);
-    cJSON_AddObjectToObject(setup, "inputAudioTranscription");
-    cJSON_AddObjectToObject(setup, "outputAudioTranscription");
+    if (cJSON_GetArraySize(tools) > 0) {
+        cJSON_AddItemToObject(setup, "tools", tools);
+    } else {
+        cJSON_Delete(tools);
+    }
+    if (s_cfg.on_transcript) {
+        cJSON_AddObjectToObject(setup, "inputAudioTranscription");
+        cJSON_AddObjectToObject(setup, "outputAudioTranscription");
+    }
     // Keep long conversations affordable: older turns slide out of the context.
     cJSON_AddObjectToObject(cJSON_AddObjectToObject(setup, "contextWindowCompression"), "slidingWindow");
 
@@ -182,6 +188,26 @@ static void send_setup(void)
         send_json(json, strlen(json));
         free(json);
     }
+}
+
+esp_err_t gemini_live_send_text(const char *text)
+{
+    if (!s_ready) return ESP_ERR_INVALID_STATE;
+    cJSON *msg = cJSON_CreateObject();
+    cJSON *cc = cJSON_AddObjectToObject(msg, "clientContent");
+    cJSON *turn = cJSON_CreateObject();
+    cJSON_AddStringToObject(turn, "role", "user");
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddStringToObject(part, "text", text);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(turn, "parts"), part);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(cc, "turns"), turn);
+    cJSON_AddBoolToObject(cc, "turnComplete", true);
+    char *json = cJSON_PrintUnformatted(msg);
+    cJSON_Delete(msg);
+    int sent = json ? send_json(json, strlen(json)) : -1;
+    free(json);
+    touch();
+    return sent >= 0 ? ESP_OK : ESP_FAIL;
 }
 
 // ---------------------------------------------------------------- receiving
@@ -212,7 +238,11 @@ static void play_base64(const char *b64)
         if (!s_pcm) return;
     }
     if (mbedtls_base64_decode(s_pcm, s_pcm_cap, &out, (const unsigned char *)b64, len) == 0 && out >= 2) {
-        audio_play((const int16_t *)s_pcm, out / 2);   // 24 kHz -> resampled to 16 kHz
+        if (s_cfg.on_audio_out) {
+            s_cfg.on_audio_out((const int16_t *)s_pcm, out / 2, s_cfg.ctx);   // recording
+        } else {
+            audio_play((const int16_t *)s_pcm, out / 2);   // 24 kHz -> resampled to 16 kHz
+        }
     }
 }
 
@@ -297,6 +327,7 @@ static void handle_message(const char *data, size_t len)
             flush_transcripts();
             s_turn_done = true;                      // READY once playback has finished
             touch();
+            if (s_cfg.on_turn_complete) s_cfg.on_turn_complete(s_cfg.ctx);
         }
     }
     if (cJSON_GetObjectItem(root, "goAway")) {

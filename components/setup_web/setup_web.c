@@ -273,7 +273,7 @@ static esp_err_t get_root(httpd_req_t *req)
         send_escaped(req, cur_voice);
         SEND(req, "</option>");
     }
-    SEND(req, "</select><p class=note>Gemini's speaking voice. Takes effect on the next conversation.</p>");
+    SEND(req, "</select><p class=note>Used in conversations. The board also re-records its own messages (\"Yes?\", \"Settings saved\", ...) in this voice so everything sounds the same.</p>");
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");

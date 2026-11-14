@@ -38,6 +38,10 @@ typedef struct {
     bool barge_in;                       // keep the mic open while Gemini talks (needs working AEC)
     bool google_search;                  // add Google Search grounding next to our function tools
     bool keep_buffered_audio;            // retry: resend speech buffered by the previous attempt
+    /** If set, Gemini's audio (24 kHz mono) goes here instead of the speaker. */
+    void (*on_audio_out)(const int16_t *pcm, size_t samples, void *ctx);
+    /** Called when Gemini finishes a turn (after turnComplete). */
+    void (*on_turn_complete)(void *ctx);
 } gemini_live_config_t;
 
 /** Start connecting. Progress and the end of the session arrive via on_state. */
@@ -47,5 +51,7 @@ esp_err_t gemini_live_stop(void);
 /** Stream microphone audio (buffered until the session is ready). speech = local VAD. */
 esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t samples, bool speech);
 bool gemini_live_ready(void);
+/** Send a text turn (e.g. a line to read aloud). */
+esp_err_t gemini_live_send_text(const char *text);
 /** Human-readable reason for the last error, e.g. "API key not valid". */
 const char *gemini_live_last_error(void);

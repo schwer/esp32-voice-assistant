@@ -29,11 +29,26 @@ typedef enum {
     PROMPT_COUNT
 } prompt_t;
 
+#include <stdbool.h>
+#include <stddef.h>
+
+/** Where lines recorded in Gemini's voice are stored (16 kHz mono s16le, one file per id). */
+#define PROMPTS_RECORDED_DIR "/data/voice"
+
 /** Start the prompt player (needs audio_init() to have succeeded). */
 esp_err_t prompts_init(void);
 /** Queue a status message. Skipped if spoken status messages are turned off. */
 void prompts_say(prompt_t p);
 /** Queue a message even when status messages are off (e.g. speaker test). */
 void prompts_say_always(prompt_t p);
+/** The id ("wake_ack_1") and text ("Yes?") of a line. */
+const char *prompts_id(prompt_t p);
+const char *prompts_text(prompt_t p);
+/** The whole embedded phrase list (for detecting when it changes). */
+const char *prompts_list_raw(size_t *len);
+/** Prefer recordings in PROMPTS_RECORDED_DIR (falls back to built-in per line). */
+void prompts_use_recorded(bool on);
+void prompts_recorded_path(prompt_t p, char *buf, size_t len);
+
 /** Answer the wake word with a short, varied acknowledgement ("Yes?", ...). */
 void prompts_wake_ack(void);

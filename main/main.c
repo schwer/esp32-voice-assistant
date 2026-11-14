@@ -21,6 +21,7 @@
 #include "diag.h"
 #include "prompts.h"
 #include "battery.h"
+#include "voicepack.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -212,6 +213,38 @@ static void check_battery(void)
     }
 }
 
+/**
+ * Setup phase: once online with an API key, record the device's lines in the
+ * conversation voice (in the background, only while idle). Re-records when the
+ * voice or model changes. Retries failures every 10 minutes.
+ */
+static void check_voicepack(void)
+{
+    static TickType_t last_attempt;
+    static bool attempted;
+    char st[96];
+    voicepack_status(st, sizeof(st));
+    diag_set_status("voice", st);
+
+    if (voicepack_just_finished()) {
+        prompts_say(PROMPT_READY);                     // first words in the new voice
+        return;
+    }
+    if (voicepack_busy() || !voicepack_needed()) return;
+    if (!net_is_connected() || !settings_has_api_key()) return;
+    if (!wakeword_is_idle() || audio_is_playing()) return;
+    // After a failure (bad key, network, quota), wait 10 minutes before trying again.
+    // Interrupted runs and voice/model changes start right away.
+    if (attempted && voicepack_last_failed() &&
+        xTaskGetTickCount() - last_attempt < pdMS_TO_TICKS(10 * 60 * 1000)) {
+        return;
+    }
+    attempted = true;
+    last_attempt = xTaskGetTickCount();
+    ESP_LOGI(TAG, "recording status messages in %s's voice", settings_get_voice());
+    voicepack_start();
+}
+
 /** Open a Gemini Live session for this conversation. */
 static esp_err_t start_session(bool google_search, bool retry)
 {
@@ -303,6 +336,7 @@ void app_main(void)
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
+        voicepack_init();                      // use lines recorded in Gemini's voice, if any
         diag_set_status("storage", "ok");
     } else {
         diag_set_status("storage", "mount failed");
@@ -331,6 +365,7 @@ void app_main(void)
         app_event_t ev;
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
             check_battery();
+            check_voicepack();
             bool now_online = net_is_connected();
             diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
             prompt_t reason = PROMPT_COUNT;
@@ -366,6 +401,10 @@ void app_main(void)
         switch (ev) {
         case EV_WAKE: {
             ESP_LOGI(TAG, "wake: starting conversation");
+            if (voicepack_busy()) {
+                voicepack_abort();                     // the user comes first; it resumes later
+                for (int i = 0; i < 60 && voicepack_busy(); i++) vTaskDelay(pdMS_TO_TICKS(50));
+            }
             s_search_retry = false;
             wakeword_converse();                       // stop wake detection while we talk
             prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
