@@ -51,9 +51,9 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 
 ## Lights and spoken status
 
-During setup the device records its own lines in the conversation voice by asking Gemini
-Live to read them (once, well under a cent), so the wake-word answer, status messages and
-conversations all sound like one assistant. Until then, and offline, it uses built-in clips.
+When you pick a different voice on the setup page, the device records its own lines in that
+voice by asking Gemini Live to read them (well under a cent), so the wake-word answer, status
+messages and conversations all sound like one assistant. Otherwise it uses built-in clips.
 
 The device also says what's happening ("I need Wi-Fi", "Ready. Say Jarvis when you need me.",
 "Settings saved", ...). Turn this off on the setup page. Phrases live in `tools/prompts.tsv`;

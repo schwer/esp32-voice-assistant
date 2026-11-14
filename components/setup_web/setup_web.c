@@ -23,6 +23,7 @@
 #include "diag_page.h"
 #include "prompts.h"
 #include "selftest.h"
+#include "voicepack.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -273,7 +274,7 @@ static esp_err_t get_root(httpd_req_t *req)
         send_escaped(req, cur_voice);
         SEND(req, "</option>");
     }
-    SEND(req, "</select><p class=note>Used in conversations. The board also re-records its own messages (\"Yes?\", \"Settings saved\", ...) in this voice so everything sounds the same.</p>");
+    SEND(req, "</select><p class=note>Used in conversations. When you pick a different voice, the board also records its own messages (\"Yes?\", \"Settings saved\", ...) in it, so everything sounds the same.</p>");
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
@@ -345,8 +346,10 @@ static esp_err_t post_save(httpd_req_t *req)
     if (form_field(body, "name", val, sizeof(val)) && val[0]) {
         err |= settings_set_name(val);
     }
-    if (form_field(body, "voice", val, sizeof(val)) && val[0]) {
-        err |= settings_set_voice(val);
+    if (form_field(body, "voice", val, sizeof(val)) && val[0] && strcmp(val, settings_get_voice()) != 0) {
+        esp_err_t verr = settings_set_voice(val);
+        err |= verr;
+        if (verr == ESP_OK) voicepack_voice_changed();   // re-record the board's lines in it
     }
     if (form_field(body, "model", val, sizeof(val)) && val[0]) {
         const char *m = strncmp(val, "models/", 7) == 0 ? val + 7 : val;   // accept either form

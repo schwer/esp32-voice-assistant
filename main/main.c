@@ -214,9 +214,9 @@ static void check_battery(void)
 }
 
 /**
- * Setup phase: once online with an API key, record the device's lines in the
- * conversation voice (in the background, only while idle). Re-records when the
- * voice or model changes. Retries failures every 10 minutes.
+ * After the voice is changed on the setup page, record the device's lines in the
+ * new voice (in the background, only while online and idle). Retries failures
+ * every 10 minutes and resumes after being interrupted by the wake word.
  */
 static void check_voicepack(void)
 {
@@ -234,7 +234,7 @@ static void check_voicepack(void)
     if (!net_is_connected() || !settings_has_api_key()) return;
     if (!wakeword_is_idle() || audio_is_playing()) return;
     // After a failure (bad key, network, quota), wait 10 minutes before trying again.
-    // Interrupted runs and voice/model changes start right away.
+    // Interrupted runs resume right away.
     if (attempted && voicepack_last_failed() &&
         xTaskGetTickCount() - last_attempt < pdMS_TO_TICKS(10 * 60 * 1000)) {
         return;

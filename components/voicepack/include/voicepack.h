@@ -3,7 +3,7 @@
 // Records the device's spoken lines (wake word answers, status messages) in the
 // conversation voice, by asking Gemini Live to read each line from tools/prompts.tsv
 // with the user's model and voice. Recordings live on flash, so they work offline.
-// Re-recorded automatically when the voice, model or phrase list changes.
+// Recording happens only when the user picks a different voice on the setup page.
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,7 +11,9 @@
 
 /** Check existing recordings; use them if they match the current voice. */
 esp_err_t voicepack_init(void);
-/** True if recordings are missing or were made with another voice/model/phrase list. */
+/** The user picked a different voice: record the lines in it when online and idle. */
+void voicepack_voice_changed(void);
+/** True while a recording requested by a voice change is still outstanding. */
 bool voicepack_needed(void);
 /** Start recording in the background (call when online, idle, with an API key). */
 esp_err_t voicepack_start(void);

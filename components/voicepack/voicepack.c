@@ -16,7 +16,8 @@
 
 static const char *TAG = "voicepack";
 
-#define META_PATH   PROMPTS_RECORDED_DIR "/meta.txt"
+#define META_PATH    PROMPTS_RECORDED_DIR "/voice.txt"     // voice the recordings were made in
+#define PENDING_PATH PROMPTS_RECORDED_DIR "/pending.txt"   // set when the voice was changed
 #define IN_RATE     24000
 #define OUT_RATE    16000
 #define MAX_SECONDS 12
@@ -33,32 +34,47 @@ static volatile bool s_failed, s_last_failed;
 static int16_t *s_cap;
 static volatile size_t s_cap_len;
 
-/** Identifies a set of recordings: voice + model + phrase list. */
-static uint32_t current_key(void)
+static void read_line(const char *path, char *buf, size_t len)
 {
-    uint32_t h = 2166136261u;
-    size_t len;
-    const char *t = prompts_list_raw(&len);
-    for (size_t i = 0; i < len; i++) h = (h ^ (uint8_t)t[i]) * 16777619u;
-    for (const char *p = settings_get_voice(); *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
-    for (const char *p = settings_get_model(); *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
-    return h;
+    buf[0] = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    if (fgets(buf, len, f)) buf[strcspn(buf, "\r\n")] = 0;
+    fclose(f);
 }
 
-static uint32_t stored_key(void)
+static bool recorded_in_current_voice(void)
 {
-    FILE *f = fopen(META_PATH, "r");
-    unsigned key = 0;
-    if (f) {
-        if (fscanf(f, "%x", &key) != 1) key = 0;
-        fclose(f);
-    }
-    return key;
+    char v[32];
+    read_line(META_PATH, v, sizeof(v));
+    return v[0] && strcmp(v, settings_get_voice()) == 0;
 }
 
 bool voicepack_needed(void)
 {
-    return stored_key() != current_key();
+    FILE *f = fopen(PENDING_PATH, "r");
+    if (f) fclose(f);
+    return f != NULL;
+}
+
+void voicepack_voice_changed(void)
+{
+    if (recorded_in_current_voice()) {             // switched back to the recorded voice
+        prompts_use_recorded(true);
+        remove(PENDING_PATH);
+        snprintf(s_state, sizeof(s_state), "recorded in %s's voice", settings_get_voice());
+        return;
+    }
+    // Old recordings are in the previous voice: use the built-in clips until re-recorded.
+    prompts_use_recorded(false);
+    if (s_busy) voicepack_abort();                 // recording the old choice: restart in the new one
+    FILE *f = fopen(PENDING_PATH, "w");
+    if (f) {
+        fprintf(f, "%s\n", settings_get_voice());
+        fclose(f);
+    }
+    snprintf(s_state, sizeof(s_state), "will record in %s's voice when idle", settings_get_voice());
+    ESP_LOGI(TAG, "voice changed to %s: recording requested", settings_get_voice());
 }
 
 esp_err_t voicepack_init(void)
@@ -66,9 +82,11 @@ esp_err_t voicepack_init(void)
     mkdir(PROMPTS_RECORDED_DIR, 0755);
     s_ready_sem = xSemaphoreCreateBinary();
     s_turn_sem = xSemaphoreCreateBinary();
-    bool ok = !voicepack_needed();
+    bool ok = recorded_in_current_voice();
     prompts_use_recorded(ok);
     if (ok) snprintf(s_state, sizeof(s_state), "recorded in %s's voice", settings_get_voice());
+    else if (voicepack_needed()) snprintf(s_state, sizeof(s_state), "will record in %s's voice when idle", settings_get_voice());
+    else snprintf(s_state, sizeof(s_state), "built-in voice (change the voice on the setup page to record)");
     return ESP_OK;
 }
 
@@ -94,8 +112,6 @@ void voicepack_status(char *buf, size_t len)
 {
     if (s_busy) {
         snprintf(buf, len, "recording line %d of %d in %s's voice", s_done + 1, s_total, settings_get_voice());
-    } else if (voicepack_needed() && strstr(s_state, "recorded in")) {
-        snprintf(buf, len, "voice changed, will re-record when idle");
     } else {
         strlcpy(buf, s_state, len);
     }
@@ -261,9 +277,10 @@ stop:
     } else if (recorded > 0 && !s_failed) {
         FILE *f = fopen(META_PATH, "w");
         if (f) {
-            fprintf(f, "%08lx\n", (unsigned long)current_key());
+            fprintf(f, "%s\n", settings_get_voice());
             fclose(f);
         }
+        remove(PENDING_PATH);
         prompts_use_recorded(true);                   // missing lines fall back to built-in
         snprintf(s_state, sizeof(s_state), "recorded in %s's voice (%d of %d lines)",
                  settings_get_voice(), recorded, PROMPT_COUNT);
