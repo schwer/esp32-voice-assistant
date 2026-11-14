@@ -1,7 +1,8 @@
 # Name,     Type, SubType,  Offset,   Size
+# nvs holds Wi-Fi and settings: keep its offset and size fixed across releases.
 nvs,        data, nvs,      0x9000,   0x6000
 phy_init,   data, phy,      0xf000,   0x1000
-factory,    app,  factory,  0x10000,  0x400000
+factory,    app,  factory,  0x10000,  0x600000
 model,      data, spiffs,   ,         0x300000
 # Saved conversations + messages recorded in Gemini's voice (two sets during a voice change)
 storage,    data, littlefs, ,         0x600000
