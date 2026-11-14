@@ -52,6 +52,11 @@ extern const uint8_t mic_test_hello_pcm_end[]   asm("_binary_mic_test_hello_pcm_
 extern const uint8_t mic_test_nothing_pcm_start[] asm("_binary_mic_test_nothing_pcm_start");
 extern const uint8_t mic_test_nothing_pcm_end[]   asm("_binary_mic_test_nothing_pcm_end");
 
+extern const uint8_t battery_low_pcm_start[] asm("_binary_battery_low_pcm_start");
+extern const uint8_t battery_low_pcm_end[]   asm("_binary_battery_low_pcm_end");
+extern const uint8_t battery_critical_pcm_start[] asm("_binary_battery_critical_pcm_start");
+extern const uint8_t battery_critical_pcm_end[]   asm("_binary_battery_critical_pcm_end");
+
 static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { ready_pcm_start, ready_pcm_end },
     { need_wifi_pcm_start, need_wifi_pcm_end },
@@ -72,6 +77,8 @@ static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { mic_test_start_pcm_start, mic_test_start_pcm_end },
     { mic_test_hello_pcm_start, mic_test_hello_pcm_end },
     { mic_test_nothing_pcm_start, mic_test_nothing_pcm_end },
+    { battery_low_pcm_start, battery_low_pcm_end },
+    { battery_critical_pcm_start, battery_critical_pcm_end },
 };
 
 static QueueHandle_t s_queue;

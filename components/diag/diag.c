@@ -21,6 +21,7 @@
 #include "storage.h"
 #include "conversations.h"
 #include "audio.h"
+#include "battery.h"
 #include "sdkconfig.h"
 #include "diag.h"
 
@@ -220,6 +221,24 @@ cJSON *diag_snapshot(void)
         cJSON_AddNumberToObject(st, "total_kb", total / 1024);
     }
     cJSON_AddNumberToObject(st, "saved_conversations", conversations_count());
+
+    // Battery
+    battery_status_t bat;
+    battery_read(&bat);
+    cJSON *b = add_obj(root, "battery");
+    cJSON_AddBoolToObject(b, "detected", bat.present);
+    if (bat.present) {
+        char v[16];
+        snprintf(v, sizeof(v), "%.2f V", bat.volts);
+        cJSON_AddNumberToObject(b, "percent", bat.percent);
+        cJSON_AddStringToObject(b, "voltage", v);
+        cJSON_AddNumberToObject(b, "sense_pin", bat.gpio);
+    }
+    char pv[24];
+    snprintf(pv, sizeof(pv), "%.0f mV", bat.pin_mv[0]);
+    cJSON_AddStringToObject(b, "GPIO1 reading", pv);
+    snprintf(pv, sizeof(pv), "%.0f mV", bat.pin_mv[1]);
+    cJSON_AddStringToObject(b, "GPIO8 reading", pv);
 
     // Microphone input levels: talk and these rise on the mic channels;
     // the speaker test makes the reference channel rise.

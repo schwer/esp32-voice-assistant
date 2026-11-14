@@ -20,6 +20,7 @@
 #include "conversations.h"
 #include "diag.h"
 #include "prompts.h"
+#include "battery.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -181,6 +182,36 @@ static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
     gemini_live_send_audio(pcm, samples, speech);   // the client tracks the idle timeout
 }
 
+/**
+ * Announce low battery once at 10% and once at 4% (re-armed after charging past 20%).
+ * Only while idle, so it never talks over a conversation.
+ */
+static void check_battery(void)
+{
+    static bool warned_low, warned_critical;
+    battery_status_t b;
+    battery_read(&b);
+    char s[48];
+    if (b.present) {
+        snprintf(s, sizeof(s), "%d%% (%.2f V)", b.percent, b.volts);
+    } else {
+        snprintf(s, sizeof(s), "no battery detected");
+    }
+    diag_set_status("battery", s);
+    if (!b.present) return;
+    if (b.percent >= 20) {
+        warned_low = warned_critical = false;
+    }
+    if (!wakeword_is_idle() || audio_is_playing()) return;
+    if (b.percent <= 4 && !warned_critical) {
+        warned_critical = warned_low = true;
+        prompts_say(PROMPT_BATTERY_CRITICAL);
+    } else if (b.percent <= 10 && !warned_low) {
+        warned_low = true;
+        prompts_say(PROMPT_BATTERY_LOW);
+    }
+}
+
 /** Open a Gemini Live session for this conversation. */
 static esp_err_t start_session(bool google_search, bool retry)
 {
@@ -233,6 +264,8 @@ void app_main(void)
     } else {
         diag_set_status("speaker", esp_err_to_name(aerr));
     }
+
+    if (battery_init() != ESP_OK) ESP_LOGW(TAG, "battery sensing unavailable");
 
     ESP_ERROR_CHECK(net_init());
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
@@ -297,6 +330,7 @@ void app_main(void)
     for (;;) {
         app_event_t ev;
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            check_battery();
             bool now_online = net_is_connected();
             diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
             prompt_t reason = PROMPT_COUNT;

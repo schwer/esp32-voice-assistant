@@ -2,7 +2,8 @@
 set(clips ready need_wifi need_api_key wifi_lost wifi_back no_internet gemini_failed
           saved settings_saved deleted error speaker_test
           wake_ack_1 wake_ack_2 wake_ack_3 not_ready
-          mic_test_start mic_test_hello mic_test_nothing)
+          mic_test_start mic_test_hello mic_test_nothing
+          battery_low battery_critical)
 set(clip_files)
 foreach(c ${clips})
     list(APPEND clip_files "clips/${c}.pcm")

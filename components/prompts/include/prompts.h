@@ -24,6 +24,8 @@ typedef enum {
     PROMPT_MIC_TEST_START, // "Microphone test. Say hi."
     PROMPT_MIC_TEST_HELLO, // "Hello! I heard you. Here's what you said."
     PROMPT_MIC_TEST_NOTHING, // "I didn't hear anything. Check the microphone levels ..."
+    PROMPT_BATTERY_LOW,    // "My battery is at ten percent. Please charge me soon."
+    PROMPT_BATTERY_CRITICAL, // "My battery is almost empty. I'll turn off soon unless you charge me."
     PROMPT_COUNT
 } prompt_t;
 
