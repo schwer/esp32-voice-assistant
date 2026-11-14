@@ -33,6 +33,7 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/wakeword` | Always-on wake word detection |
 | `components/net` | Wi-Fi station, credentials in NVS, power on/off |
 | `components/improv` | Improv Wi-Fi over serial for the web flasher |
+| `components/leds` | LED ring status: blue pulse = connecting, color cycle = listening, white = speaking, red = error |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |

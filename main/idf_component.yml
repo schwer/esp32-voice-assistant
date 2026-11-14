@@ -5,3 +5,4 @@ dependencies:
   espressif/mdns: "^1.4.0"
   joltwallet/littlefs: "^1.14.0"
   espressif/esp-sr: "^2.0.0"
+  espressif/led_strip: "^3.0.0"
