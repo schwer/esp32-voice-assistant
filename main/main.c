@@ -98,6 +98,19 @@ static cJSON *tool_handler(const char *name, const cJSON *args)
     return r;
 }
 
+/** Wait for anything we're saying to finish, then listen for "Jarvis" again. */
+static void back_to_listening(void)
+{
+    vTaskDelay(pdMS_TO_TICKS(300));               // let queued prompts start
+    for (int i = 0; i < 200 && audio_is_playing(); i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));               // tail of the speaker's echo
+    leds_state_t cur = leds_get();
+    if (cur != LEDS_ERROR) leds_set(idle_state());
+    wakeword_listen();
+}
+
 static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 {
     // TODO: track silence for CONFIG_VA_IDLE_TIMEOUT_S, then post EV_SESSION_ENDED
@@ -182,13 +195,13 @@ void app_main(void)
     if (aerr != ESP_OK) {
         ESP_LOGW(TAG, "wake word not running (%s); setup page still available",
                  esp_err_to_name(aerr));
-        diag_set_status("microphones", "not implemented yet");
-        diag_set_status("wake word", "waiting for microphones");
+        diag_set_status("microphones", audio_mic_ready() ? "ok" : "not responding");
+        diag_set_status("wake word", "not running (see log)");
     } else {
         diag_set_status("microphones", "ok");
         diag_set_status("wake word", "listening for \"Jarvis\"");
     }
-    diag_set_status("gemini", "not implemented yet");
+    diag_set_status("gemini", "conversations not implemented yet");
 
     for (;;) {
         app_event_t ev;
@@ -221,24 +234,32 @@ void app_main(void)
         switch (ev) {
         case EV_WAKE: {
             ESP_LOGI(TAG, "wake: starting conversation");
+            wakeword_converse();                       // stop wake detection while we talk
+            prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
             leds_set(LEDS_CONNECTING);
             // TODO: chime, SNTP if stale
             wifi_expected = true;
             if (net_connect(8000) != ESP_OK) {
                 ESP_LOGW(TAG, "no Wi-Fi");
                 set_light(LEDS_ERROR, PROMPT_NO_INTERNET);
+                back_to_listening();
                 break;
             }
             was_online = true;
-            conversations_session_begin();
-            wakeword_converse();                       // audio now flows to Gemini (buffered)
+            conversations_session_begin();             // audio now flows to Gemini (buffered)
             gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
             cfg.tool_handler = tool_handler;
             cfg.on_state = on_gemini_state;
             cfg.system_instruction_extra = appointments_summary(14);
-            if (gemini_live_start(&cfg) != ESP_OK) {
+            esp_err_t gerr = gemini_live_start(&cfg);
+            if (gerr == ESP_ERR_NOT_SUPPORTED) {
+                // Conversations aren't built yet: say so, then listen for "Jarvis" again.
+                leds_set(LEDS_SPEAKING);
+                prompts_say_always(PROMPT_NOT_READY);
+                back_to_listening();
+            } else if (gerr != ESP_OK) {
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
-                wakeword_listen();
+                back_to_listening();
             }
             break;
         }

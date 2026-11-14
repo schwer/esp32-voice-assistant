@@ -5,7 +5,11 @@
 #include "freertos/stream_buffer.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include <math.h>
 #include "driver/i2s_std.h"
+#include "driver/i2s_tdm.h"
+#include "es7210_adc.h"
+#include "sdkconfig.h"
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "es8311_codec.h"
@@ -22,8 +26,15 @@ static const char *TAG = "audio";
 
 static i2c_master_bus_handle_t s_i2c;
 static esp_io_expander_handle_t s_expander;
-static i2s_chan_handle_t s_tx;
-static esp_codec_dev_handle_t s_spk;
+static i2s_chan_handle_t s_tx, s_rx;
+static esp_codec_dev_handle_t s_spk, s_mic;
+static const audio_codec_data_if_t *s_data_if;
+static bool s_mic_ok;
+
+#define MIC_CHANNELS   4                 // ES7210 TDM slots; layout = CONFIG_VA_AFE_INPUT_FORMAT
+#define MIC_GAIN_DB    30.0f
+#define REF_GAIN_DB    0.0f
+static float s_level_db[MIC_CHANNELS] = { -96, -96, -96, -96 };
 static StreamBufferHandle_t s_play;
 static volatile bool s_flush;
 static volatile bool s_writing;
@@ -99,31 +110,46 @@ static void init_expander(void)
 
 static esp_err_t init_i2s(void)
 {
+    // Both codecs share MCLK/BCLK/WS: one I2S port in full duplex.
+    // TX (ES8311 speaker) uses standard Philips framing, RX (ES7210, 4 channels) uses TDM.
     i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(BOARD_I2S_PORT, I2S_ROLE_MASTER);
     chan.auto_clear = true;                            // silence on underrun
-    // TODO(mic): create TX+RX together (full duplex) when the ES7210 input lands.
-    esp_err_t err = i2s_new_channel(&chan, &s_tx, NULL);
+    esp_err_t err = i2s_new_channel(&chan, &s_tx, &s_rx);
     if (err != ESP_OK) return err;
 
+    const i2s_std_gpio_config_t std_gpio = {
+        .mclk = BOARD_I2S_MCLK, .bclk = BOARD_I2S_BCLK, .ws = BOARD_I2S_WS,
+        .dout = BOARD_I2S_DOUT, .din = BOARD_I2S_DIN,
+    };
     i2s_std_config_t std = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(BOARD_I2S_SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = std_gpio,
+    };
+    if ((err = i2s_channel_init_std_mode(s_tx, &std)) != ESP_OK) return err;
+
+    i2s_tdm_config_t tdm = {
+        .clk_cfg = {
+            .sample_rate_hz = BOARD_I2S_SAMPLE_RATE,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+            .bclk_div = 8,
+        },
+        .slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO,
+                        I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3),
         .gpio_cfg = {
-            .mclk = BOARD_I2S_MCLK,
-            .bclk = BOARD_I2S_BCLK,
-            .ws = BOARD_I2S_WS,
-            .dout = BOARD_I2S_DOUT,
-            .din = I2S_GPIO_UNUSED,
+            .mclk = BOARD_I2S_MCLK, .bclk = BOARD_I2S_BCLK, .ws = BOARD_I2S_WS,
+            .dout = BOARD_I2S_DOUT, .din = BOARD_I2S_DIN,
         },
     };
-    std.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;        // same sample on L and R
-    return i2s_channel_init_std_mode(s_tx, &std);
+    return i2s_channel_init_tdm_mode(s_rx, &tdm);
 }
 
 static esp_err_t init_codec(void)
 {
-    audio_codec_i2s_cfg_t i2s_cfg = { .port = BOARD_I2S_PORT, .tx_handle = s_tx };
+    audio_codec_i2s_cfg_t i2s_cfg = { .port = BOARD_I2S_PORT, .tx_handle = s_tx, .rx_handle = s_rx };
     const audio_codec_data_if_t *data_if = audio_codec_new_i2s_data(&i2s_cfg);
+    s_data_if = data_if;
 
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = BOARD_I2C_PORT,
@@ -163,6 +189,48 @@ static esp_err_t init_codec(void)
     return ESP_OK;
 }
 
+/** ES7210 4-channel ADC: 2 microphones + playback reference for echo cancellation. */
+static esp_err_t init_mic(void)
+{
+    audio_codec_i2c_cfg_t i2c_cfg = {
+        .port = BOARD_I2C_PORT,
+        .addr = ES7210_CODEC_DEFAULT_ADDR,
+        .bus_handle = s_i2c,
+    };
+    const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    if (!ctrl_if || !s_data_if) return ESP_FAIL;
+
+    es7210_codec_cfg_t es_cfg = {
+        .ctrl_if = ctrl_if,
+        .mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3 | ES7210_SEL_MIC4,
+    };
+    const audio_codec_if_t *codec_if = es7210_codec_new(&es_cfg);
+    if (!codec_if) return ESP_FAIL;
+
+    esp_codec_dev_cfg_t dev_cfg = {
+        .dev_type = ESP_CODEC_DEV_TYPE_IN,
+        .codec_if = codec_if,
+        .data_if = s_data_if,
+    };
+    s_mic = esp_codec_dev_new(&dev_cfg);
+    if (!s_mic) return ESP_FAIL;
+
+    esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = 16,
+        .channel = MIC_CHANNELS,
+        .sample_rate = BOARD_I2S_SAMPLE_RATE,
+    };
+    if (esp_codec_dev_open(s_mic, &fs) != ESP_CODEC_DEV_OK) return ESP_FAIL;
+
+    // Mic channels get gain; the playback reference channel stays at 0 dB.
+    const char *fmt = CONFIG_VA_AFE_INPUT_FORMAT;
+    for (int ch = 0; ch < MIC_CHANNELS && fmt[ch]; ch++) {
+        esp_codec_dev_set_in_channel_gain(s_mic, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(ch),
+                                          fmt[ch] == 'R' ? REF_GAIN_DB : MIC_GAIN_DB);
+    }
+    return ESP_OK;
+}
+
 esp_err_t audio_init(void)
 {
     esp_err_t err = init_i2c();
@@ -179,6 +247,13 @@ esp_err_t audio_init(void)
         ESP_LOGE(TAG, "ES8311 speaker codec not responding");
         return err;
     }
+    if (init_mic() == ESP_OK) {
+        s_mic_ok = true;
+        ESP_LOGI(TAG, "microphones ready (%d channels, layout %s)", MIC_CHANNELS,
+                 CONFIG_VA_AFE_INPUT_FORMAT);
+    } else {
+        ESP_LOGE(TAG, "ES7210 microphone codec not responding");   // speaker still usable
+    }
 
     uint8_t *storage = heap_caps_malloc(PLAY_BUF_BYTES + 1, MALLOC_CAP_SPIRAM);
     static StaticStreamBuffer_t sb;
@@ -190,13 +265,36 @@ esp_err_t audio_init(void)
     return ESP_OK;
 }
 
-bool audio_mic_ready(void) { return false; }
+bool audio_mic_ready(void) { return s_mic_ok; }
 
-size_t audio_read_raw(int16_t *buf, size_t n, int ch, uint32_t t)
+size_t audio_read_raw(int16_t *buf, size_t frames, int channels, uint32_t timeout_ticks)
 {
-    // TODO(mic): ES7210 via I2S TDM RX
-    (void)buf; (void)n; (void)ch; (void)t;
-    return 0;
+    (void)timeout_ticks;                               // esp_codec_dev_read blocks per frame period
+    if (!s_mic_ok || channels != MIC_CHANNELS) return 0;
+    if (esp_codec_dev_read(s_mic, buf, (int)(frames * channels * sizeof(int16_t))) != ESP_CODEC_DEV_OK) {
+        return 0;
+    }
+    // Per-channel level for diagnostics (cheap: every 8th block).
+    static int n;
+    if ((n++ & 7) == 0) {
+        for (int ch = 0; ch < channels; ch++) {
+            double sum = 0;
+            for (size_t i = 0; i < frames; i++) {
+                double v = buf[i * channels + ch];
+                sum += v * v;
+            }
+            double rms = sqrt(sum / frames) / 32768.0;
+            s_level_db[ch] = rms > 1e-5 ? (float)(20.0 * log10(rms)) : -96.0f;
+        }
+    }
+    return frames;
+}
+
+int audio_input_levels(float *db, int max)
+{
+    int n = max < MIC_CHANNELS ? max : MIC_CHANNELS;
+    for (int i = 0; i < n; i++) db[i] = s_level_db[i];
+    return s_mic_ok ? n : 0;
 }
 
 esp_err_t audio_play_16k(const int16_t *pcm, size_t samples)

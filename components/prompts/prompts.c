@@ -6,6 +6,7 @@
 #include "audio.h"
 #include "settings.h"
 #include "prompts.h"
+#include "esp_random.h"
 
 static const char *TAG = "prompts";
 
@@ -35,6 +36,15 @@ extern const uint8_t error_pcm_end[]   asm("_binary_error_pcm_end");
 extern const uint8_t speaker_test_pcm_start[] asm("_binary_speaker_test_pcm_start");
 extern const uint8_t speaker_test_pcm_end[]   asm("_binary_speaker_test_pcm_end");
 
+extern const uint8_t wake_ack_1_pcm_start[] asm("_binary_wake_ack_1_pcm_start");
+extern const uint8_t wake_ack_1_pcm_end[]   asm("_binary_wake_ack_1_pcm_end");
+extern const uint8_t wake_ack_2_pcm_start[] asm("_binary_wake_ack_2_pcm_start");
+extern const uint8_t wake_ack_2_pcm_end[]   asm("_binary_wake_ack_2_pcm_end");
+extern const uint8_t wake_ack_3_pcm_start[] asm("_binary_wake_ack_3_pcm_start");
+extern const uint8_t wake_ack_3_pcm_end[]   asm("_binary_wake_ack_3_pcm_end");
+extern const uint8_t not_ready_pcm_start[] asm("_binary_not_ready_pcm_start");
+extern const uint8_t not_ready_pcm_end[]   asm("_binary_not_ready_pcm_end");
+
 static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { ready_pcm_start, ready_pcm_end },
     { need_wifi_pcm_start, need_wifi_pcm_end },
@@ -48,6 +58,10 @@ static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { deleted_pcm_start, deleted_pcm_end },
     { error_pcm_start, error_pcm_end },
     { speaker_test_pcm_start, speaker_test_pcm_end },
+    { wake_ack_1_pcm_start, wake_ack_1_pcm_end },
+    { wake_ack_2_pcm_start, wake_ack_2_pcm_end },
+    { wake_ack_3_pcm_start, wake_ack_3_pcm_end },
+    { not_ready_pcm_start, not_ready_pcm_end },
 };
 
 static QueueHandle_t s_queue;
@@ -81,4 +95,10 @@ void prompts_say_always(prompt_t p)
 void prompts_say(prompt_t p)
 {
     if (settings_get_spoken_status()) prompts_say_always(p);
+}
+
+void prompts_wake_ack(void)
+{
+    // Always spoken: it's the answer to "Jarvis", not a status message.
+    prompts_say_always((prompt_t)(PROMPT_WAKE_ACK_1 + esp_random() % 3));
 }

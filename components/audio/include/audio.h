@@ -14,7 +14,9 @@ esp_err_t audio_init(void);
 /** Shared I2C bus (codecs, IO expander, RTC). NULL before audio_init(). */
 i2c_master_bus_handle_t audio_i2c_bus(void);
 
-/** True once the microphones are running (not implemented yet). */
+/** Recent level of each input channel in dBFS (diagnostics). Returns channel count. */
+int audio_input_levels(float *db, int max);
+/** True once the microphones are running. */
 bool audio_mic_ready(void);
 /**
  * Read interleaved raw frames (mics + playback reference) for the AFE.

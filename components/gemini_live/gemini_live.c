@@ -7,7 +7,7 @@
 //       Setup must include tools_declarations(), tools_system_instruction(), and
 //       inputAudioTranscription/outputAudioTranscription; feed transcription text to
 //       conversations_add_text("user"/"assistant", ...) for saved conversations.
-esp_err_t gemini_live_start(const gemini_live_config_t *cfg) { (void)cfg; return ESP_OK; }
+esp_err_t gemini_live_start(const gemini_live_config_t *cfg) { (void)cfg; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t gemini_live_stop(void) { return ESP_OK; }
 esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t n) { (void)pcm; (void)n; return ESP_OK; }
 bool gemini_live_ready(void) { return false; }

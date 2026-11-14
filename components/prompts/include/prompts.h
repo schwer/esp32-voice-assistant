@@ -17,6 +17,10 @@ typedef enum {
     PROMPT_DELETED,        // "Deleted."
     PROMPT_ERROR,          // "Sorry, something went wrong."
     PROMPT_SPEAKER_TEST,   // "This is a speaker test. If you can hear me, the speaker works."
+    PROMPT_WAKE_ACK_1,     // "Yes?"
+    PROMPT_WAKE_ACK_2,     // "I'm listening."
+    PROMPT_WAKE_ACK_3,     // "How can I help?"
+    PROMPT_NOT_READY,      // "I heard you, but I can't hold conversations yet. ..."
     PROMPT_COUNT
 } prompt_t;
 
@@ -26,3 +30,5 @@ esp_err_t prompts_init(void);
 void prompts_say(prompt_t p);
 /** Queue a message even when status messages are off (e.g. speaker test). */
 void prompts_say_always(prompt_t p);
+/** Answer the wake word with a short, varied acknowledgement ("Yes?", ...). */
+void prompts_wake_ack(void);

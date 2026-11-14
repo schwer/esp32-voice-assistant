@@ -55,7 +55,7 @@ CI regenerates the clips with Piper TTS when that file changes.
 | Pattern | Meaning |
 |---|---|
 | Off | Idle, waiting for "Jarvis" |
-| Quick white flash | Heard "Jarvis" |
+| Quick white flash | Heard "Jarvis" (it also answers "Yes?", "I'm listening." or "How can I help?") |
 | Blue pulse | Starting up or connecting |
 | Rainbow cycle | Ready for your voice |
 | Purple spinner | Working on your request |

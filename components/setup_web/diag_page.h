@@ -49,7 +49,7 @@ static const char DIAG_PAGE[] =
 "<a href='/diag/logs'>/diag/logs</a></p>"
 "</main><script>"
 "const TITLES={device:'Device',memory:'Memory',wifi:'Wi-Fi',time:'Time',settings:'Settings',"
-"storage:'Storage',modules:'Modules'};"
+"storage:'Storage',audio_input:'Microphone levels',modules:'Modules'};"
 "const LABELS={ssid:'Network',ip:'IP address',mac:'MAC address',wifi:'Wi-Fi',gemini:'Gemini',rssi_dbm:'Signal (dBm)',uptime_s:'Uptime',api_key_set:'API key',esp_idf:'ESP-IDF',"
 "psram_total_kb:'PSRAM total (KB)',psram_free_kb:'PSRAM free (KB)',psram_min_free_kb:'PSRAM lowest free (KB)',"
 "internal_free_kb:'RAM free (KB)',internal_min_free_kb:'RAM lowest free (KB)',"

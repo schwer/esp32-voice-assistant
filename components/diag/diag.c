@@ -20,6 +20,8 @@
 #include "settings.h"
 #include "storage.h"
 #include "conversations.h"
+#include "audio.h"
+#include "sdkconfig.h"
 #include "diag.h"
 
 static const char *TAG = "diag";
@@ -218,6 +220,23 @@ cJSON *diag_snapshot(void)
         cJSON_AddNumberToObject(st, "total_kb", total / 1024);
     }
     cJSON_AddNumberToObject(st, "saved_conversations", conversations_count());
+
+    // Microphone input levels: talk and these rise on the mic channels;
+    // the speaker test makes the reference channel rise.
+    float db[4];
+    int nch = audio_input_levels(db, 4);
+    if (nch > 0) {
+        cJSON *mic = add_obj(root, "audio_input");
+        const char *fmt = CONFIG_VA_AFE_INPUT_FORMAT;
+        for (int i = 0; i < nch; i++) {
+            char key[32], val[24];
+            char role = fmt[i] ? fmt[i] : '?';
+            snprintf(key, sizeof(key), "channel %d (%s)", i + 1,
+                     role == 'M' ? "mic" : role == 'R' ? "speaker reference" : "unused");
+            snprintf(val, sizeof(val), "%.0f dB", db[i]);
+            cJSON_AddStringToObject(mic, key, val);
+        }
+    }
 
     // Modules
     cJSON *mods = add_obj(root, "modules");
