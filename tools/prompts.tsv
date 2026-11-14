@@ -18,3 +18,5 @@ not_ready	I heard you, but I can't hold conversations yet. That part is still be
 mic_test_start	Microphone test. Say hi.
 mic_test_hello	Hello! I heard you. Here's what you said.
 mic_test_nothing	I didn't hear anything. Check the microphone levels on the diagnostics page.
+battery_low	My battery is at ten percent. Please charge me soon.
+battery_critical	My battery is almost empty. I'll turn off soon unless you charge me.
