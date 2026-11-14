@@ -15,6 +15,8 @@
 #include "improv.h"
 #include "settings.h"
 #include "leds.h"
+#include "storage.h"
+#include "conversations.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -79,6 +81,9 @@ void app_main(void)
         leds_set(LEDS_ERROR);
     }
 
+    if (storage_init() == ESP_OK) {
+        ESP_ERROR_CHECK(conversations_init());
+    }
     ESP_ERROR_CHECK(appointments_init());
 
     // Audio problems are logged, not fatal: a reboot loop would hide the setup page.
@@ -105,6 +110,7 @@ void app_main(void)
                 leds_set(LEDS_ERROR);
                 break;
             }
+            conversations_session_begin();
             wakeword_converse();                       // audio now flows to Gemini (buffered)
             gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
             cfg.tool_handler = tools_handle_call;

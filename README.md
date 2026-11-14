@@ -12,6 +12,8 @@ There's no phone app and no cloud backend of your own.
 - Echo cancellation via Espressif AFE
 - **On-device memory**: appointments and notes stored on flash, exposed to the model as tools
 - Spoken reminders, triggered by the device itself
+- **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
+  hear the saved ones newest first and say "that one"
 - Wake word with Wi-Fi off between conversations, for battery operation. See [docs/power.md](docs/power.md).
 - Local setup page at `http://assistant.local`
 - `.ics` export of appointments
@@ -34,6 +36,8 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/net` | Wi-Fi station, credentials in NVS, power on/off |
 | `components/improv` | Improv Wi-Fi over serial for the web flasher |
 | `components/leds` | LED ring status: blue pulse = connecting, color cycle = listening, white = speaking, red = error |
+| `components/storage` | LittleFS on the `storage` partition at `/data` |
+| `components/conversations` | Saved conversations: rolling transcript, save/list/load/delete |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |
