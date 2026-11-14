@@ -17,6 +17,7 @@
 #include "leds.h"
 #include "storage.h"
 #include "conversations.h"
+#include "diag.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -52,6 +53,7 @@ static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
+    diag_init();                               // capture logs for the diagnostics page
     s_events = xQueueCreate(4, sizeof(app_event_t));
 
     ESP_ERROR_CHECK(settings_init());
@@ -64,15 +66,27 @@ void app_main(void)
 
     ESP_ERROR_CHECK(net_init());
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
-    bool online = net_has_credentials() && net_connect(10000) == ESP_OK;
 
     // Setup page first, so the device stays configurable even if audio fails.
+    // It serves on whatever IP Wi-Fi gets, whenever that happens.
     if (setup_web_start() != ESP_OK) {
         ESP_LOGE(TAG, "setup page failed to start");
     }
 
-    // Boot self-test: one short color cycle shows the LED ring works;
-    // red blinks mean Wi-Fi isn't set up or couldn't connect.
+    // Boot indicator: blue pulse until Wi-Fi is up (it keeps retrying in the
+    // background), then one rainbow cycle. Red blinks only if there are no Wi-Fi
+    // settings, or it's still offline after 30 s.
+    bool online = false;
+    if (net_has_credentials()) {
+        net_connect(10000);
+        for (int i = 0; i < 40 && !net_is_connected(); i++) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        online = net_is_connected();
+    } else {
+        ESP_LOGW(TAG, "no Wi-Fi settings: use the web flasher to set them");
+    }
+    diag_set_status("wifi", online ? "connected" : "not connected (retrying)");
     if (online) {
         leds_set(LEDS_LISTENING);
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -83,6 +97,9 @@ void app_main(void)
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
+        diag_set_status("storage", "ok");
+    } else {
+        diag_set_status("storage", "mount failed");
     }
     ESP_ERROR_CHECK(appointments_init());
 
@@ -95,7 +112,13 @@ void app_main(void)
     if (aerr != ESP_OK) {
         ESP_LOGW(TAG, "audio/wake word not running (%s); setup page still available",
                  esp_err_to_name(aerr));
+        diag_set_status("audio", aerr == ESP_ERR_NOT_SUPPORTED ? "not implemented yet" : esp_err_to_name(aerr));
+        diag_set_status("wake word", "waiting for audio");
+    } else {
+        diag_set_status("audio", "ok");
+        diag_set_status("wake word", "listening for \"Jarvis\"");
     }
+    diag_set_status("gemini", "not implemented yet");
 
     for (;;) {
         app_event_t ev;

@@ -18,6 +18,12 @@
 #include "settings.h"
 #include "net.h"
 #include "setup_web.h"
+#include "diag.h"
+#include "leds.h"
+#include "diag_page.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
+#include "esp_system.h"
 
 static const char *TAG = "setup_web";
 static httpd_handle_t s_server;
@@ -113,6 +119,31 @@ static bool form_field(const char *body, const char *key, char *out, size_t len)
     url_decode(out);
     trim(out);
     return true;
+}
+
+/**
+ * Reject cross-site requests: another website open in the user's browser must not
+ * be able to change settings or reboot the device. The browser always sends Origin
+ * on cross-site POSTs, so it must match the Host we were reached on.
+ */
+static bool same_origin(httpd_req_t *req)
+{
+    char origin[96] = "", host[64] = "";
+    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+        return true;                     // non-browser client, or same-origin GET-style form
+    }
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        return false;
+    }
+    const char *o = strstr(origin, "://");
+    return o && strcmp(o + 3, host) == 0;
+}
+
+static esp_err_t forbid(httpd_req_t *req)
+{
+    ESP_LOGW(TAG, "blocked cross-site request to %s", req->uri);
+    httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Cross-site request blocked");
+    return ESP_FAIL;
 }
 
 // ---------- page ----------
@@ -221,13 +252,17 @@ static esp_err_t get_root(httpd_req_t *req)
     send_escaped(req, now);
     SEND(req, "</dd><dt>Firmware</dt><dd>");
     send_escaped(req, app->version);
-    SEND(req, "</dd></dl></div></main></body></html>");
+    SEND(req, "</dd></dl><p style='margin:14px 0 0'><a href='/diag'>Diagnostics &rarr;</a></p>"
+              "</div></main></body></html>");
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
 static esp_err_t post_save(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "POST /save (%d bytes)", (int)req->content_len);
+    if (!same_origin(req)) {
+        return forbid(req);
+    }
     char body[512];
     if (req->content_len >= sizeof(body)) {
         httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "Too large");
@@ -268,6 +303,89 @@ static esp_err_t post_save(httpd_req_t *req)
     return httpd_resp_send(req, NULL, 0);
 }
 
+// ---------- diagnostics ----------
+
+static esp_err_t send_json(httpd_req_t *req, cJSON *json)
+{
+    char *s = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (!s) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_sendstr(req, s);
+    free(s);
+    return err;
+}
+
+/** Diagnostics actions must come from our own page (custom header => no cross-site). */
+static bool diag_action_allowed(httpd_req_t *req)
+{
+    char v[4];
+    return same_origin(req) &&
+           httpd_req_get_hdr_value_str(req, "X-Assistant", v, sizeof(v)) == ESP_OK;
+}
+
+static esp_err_t get_diag(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, DIAG_PAGE, sizeof(DIAG_PAGE) - 1);
+}
+
+static esp_err_t get_diag_json(httpd_req_t *req)
+{
+    return send_json(req, diag_snapshot());
+}
+
+static esp_err_t get_diag_logs(httpd_req_t *req)
+{
+    const size_t len = 8 * 1024 + 1;
+    char *buf = malloc(len);
+    if (!buf) {
+        return httpd_resp_send_500(req);
+    }
+    size_t n = diag_logs(buf, len);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_send(req, buf, n);
+    free(buf);
+    return err;
+}
+
+static esp_err_t post_test_gemini(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    return send_json(req, diag_test_gemini());
+}
+
+static esp_err_t post_led_test(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    leds_test();
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    cJSON_AddStringToObject(r, "message",
+        "The ring should show a rotating rainbow for 3 seconds. If red looks green, tell the developer.");
+    return send_json(req, r);
+}
+
+static void do_restart(TimerHandle_t t) { esp_restart(); }
+
+static esp_err_t post_reboot(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    ESP_LOGW(TAG, "reboot requested from diagnostics page");
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    cJSON_AddStringToObject(r, "message", "Rebooting... this page reconnects automatically.");
+    esp_err_t err = send_json(req, r);
+    TimerHandle_t t = xTimerCreate("reboot", pdMS_TO_TICKS(500), pdFALSE, NULL, do_restart);
+    if (t) xTimerStart(t, 0);
+    return err;
+}
+
 // ---------- lifecycle ----------
 
 static void start_mdns(void)
@@ -289,14 +407,26 @@ esp_err_t setup_web_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 6144;
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 16;
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
         return err;
     }
     static const httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = get_root };
     static const httpd_uri_t save = { .uri = "/save", .method = HTTP_POST, .handler = post_save };
+    static const httpd_uri_t handlers[] = {
+        { .uri = "/diag",             .method = HTTP_GET,  .handler = get_diag },
+        { .uri = "/diag.json",        .method = HTTP_GET,  .handler = get_diag_json },
+        { .uri = "/diag/logs",        .method = HTTP_GET,  .handler = get_diag_logs },
+        { .uri = "/diag/test-gemini", .method = HTTP_POST, .handler = post_test_gemini },
+        { .uri = "/diag/led-test",    .method = HTTP_POST, .handler = post_led_test },
+        { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
+    };
     httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &save);
+    for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {
+        httpd_register_uri_handler(s_server, &handlers[i]);
+    }
     start_mdns();
     char url[64] = "";
     net_device_url(url, sizeof(url));

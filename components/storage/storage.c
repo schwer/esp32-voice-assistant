@@ -23,3 +23,8 @@ esp_err_t storage_init(void)
              (unsigned)(used / 1024), (unsigned)(total / 1024));
     return ESP_OK;
 }
+
+esp_err_t storage_info(size_t *total, size_t *used)
+{
+    return esp_littlefs_info("storage", total, used);
+}

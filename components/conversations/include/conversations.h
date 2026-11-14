@@ -30,3 +30,5 @@ cJSON *conversations_list(void);
 /** {"id","title","saved","summary","transcript"} and marks the session as resumed. */
 cJSON *conversations_load(int id);
 cJSON *conversations_delete(int id);
+/** Number of saved conversations (-1 if storage is unavailable). */
+int conversations_count(void);

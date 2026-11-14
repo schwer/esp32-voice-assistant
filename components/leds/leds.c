@@ -2,6 +2,7 @@
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "esp_log.h"
 #include "led_strip.h"
 #include "board.h"
@@ -125,4 +126,19 @@ void leds_set(leds_state_t state)
     if (s_task) {
         xTaskNotifyGive(s_task);
     }
+}
+
+static void test_done(TimerHandle_t t)
+{
+    leds_set(LEDS_OFF);
+}
+
+void leds_test(void)
+{
+    static TimerHandle_t timer;
+    if (!timer) {
+        timer = xTimerCreate("led_test", pdMS_TO_TICKS(3000), pdFALSE, NULL, test_done);
+    }
+    leds_set(LEDS_LISTENING);
+    xTimerReset(timer, 0);
 }

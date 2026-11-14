@@ -329,3 +329,16 @@ cJSON *conversations_delete(int id)
     cJSON_AddBoolToObject(r, "deleted", true);
     return r;
 }
+
+int conversations_count(void)
+{
+    if (!s_lock) {
+        return -1;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cJSON *idx = load_index();
+    int n = cJSON_GetArraySize(idx);
+    cJSON_Delete(idx);
+    xSemaphoreGive(s_lock);
+    return n;
+}

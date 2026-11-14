@@ -15,7 +15,7 @@ There's no phone app and no cloud backend of your own.
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
   hear the saved ones newest first and say "that one"
 - Wake word with Wi-Fi off between conversations, for battery operation. See [docs/power.md](docs/power.md).
-- Local setup page at `http://assistant.local`
+- Local setup page at `http://assistant.local`, with a diagnostics page at `/diag`
 - `.ics` export of appointments
 - Optional account integrations (Google Calendar, IMAP, CalDAV, Outlook), authorized on your LAN.
   See [docs/integrations.md](docs/integrations.md).
@@ -38,6 +38,7 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/leds` | LED ring status: blue pulse = connecting, color cycle = listening, white = speaking, red = error |
 | `components/storage` | LittleFS on the `storage` partition at `/data` |
 | `components/conversations` | Saved conversations: rolling transcript, save/list/load/delete |
+| `components/diag` | Diagnostics: log capture, health snapshot, API key check (`/diag`) |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |

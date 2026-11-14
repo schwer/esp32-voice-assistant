@@ -13,3 +13,5 @@ typedef enum {
 
 esp_err_t leds_init(void);
 void leds_set(leds_state_t state);
+/** Diagnostics: color cycle for ~3 s, then off. */
+void leds_test(void);
