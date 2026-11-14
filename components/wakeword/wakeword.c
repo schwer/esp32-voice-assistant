@@ -37,9 +37,9 @@ static void feed_task(void *arg)
 static void fetch_task(void *arg)
 {
     for (;;) {
-        afe_fetch_result_t *res = s_afe->fetch(s_data);
-        if (!res || res->ret_value == ESP_FAIL) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+        afe_fetch_result_t *res = s_afe->fetch_with_delay(s_data, pdMS_TO_TICKS(100));
+        if (!res || res->ret_value == ESP_FAIL || res->data_size <= 0) {
+            vTaskDelay(pdMS_TO_TICKS(10));     // never spin: other tasks (web server) need the CPU
             continue;
         }
         if (!s_conversing && res->wakeup_state == WAKENET_DETECTED) {
@@ -92,8 +92,9 @@ esp_err_t wakeword_start(const wakeword_config_t *cfg)
     s_afe->print_pipeline(s_data);
     ESP_LOGI(TAG, "listening for '%s'", CONFIG_VA_WAKENET_KEYWORD);
 
-    xTaskCreatePinnedToCore(feed_task, "afe_feed", 8 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(fetch_task, "afe_fetch", 8 * 1024, NULL, 5, NULL, 1);
+    // Below the web server / networking priorities so setup stays responsive.
+    xTaskCreatePinnedToCore(feed_task, "afe_feed", 8 * 1024, NULL, 4, NULL, 0);
+    xTaskCreatePinnedToCore(fetch_task, "afe_fetch", 8 * 1024, NULL, 4, NULL, 1);
     return ESP_OK;
 }
 

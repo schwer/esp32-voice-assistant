@@ -59,8 +59,13 @@ void app_main(void)
 
     // Audio problems are logged, not fatal: a reboot loop would hide the setup page.
     wakeword_config_t wcfg = { .on_wake = on_wake, .on_audio = on_audio };
-    if (audio_init() != ESP_OK || wakeword_start(&wcfg) != ESP_OK) {
-        ESP_LOGE(TAG, "audio/wake word unavailable; setup page still running");
+    esp_err_t aerr = audio_init();
+    if (aerr == ESP_OK) {
+        aerr = wakeword_start(&wcfg);
+    }
+    if (aerr != ESP_OK) {
+        ESP_LOGW(TAG, "audio/wake word not running (%s); setup page still available",
+                 esp_err_to_name(aerr));
     }
 
     for (;;) {

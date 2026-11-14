@@ -146,6 +146,7 @@ static const char PAGE_HEAD[] =
 
 static esp_err_t get_root(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "GET %s", req->uri);
     char q[32] = {0}, url[64] = "", hint[8] = "", now[40] = "";
     bool saved = httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && strstr(q, "saved=1");
     bool failed = strstr(q, "error=1") != NULL;
@@ -226,6 +227,7 @@ static esp_err_t get_root(httpd_req_t *req)
 
 static esp_err_t post_save(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "POST /save (%d bytes)", (int)req->content_len);
     char body[512];
     if (req->content_len >= sizeof(body)) {
         httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "Too large");
@@ -296,7 +298,9 @@ esp_err_t setup_web_start(void)
     httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &save);
     start_mdns();
-    ESP_LOGI(TAG, "setup page running on port 80 (http://assistant.local/)");
+    char url[64] = "";
+    net_device_url(url, sizeof(url));
+    ESP_LOGI(TAG, "setup page running: %s  (or http://assistant.local/)", url[0] ? url : "(no IP yet)");
     return ESP_OK;
 }
 
