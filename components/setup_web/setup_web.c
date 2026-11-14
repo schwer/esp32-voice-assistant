@@ -22,6 +22,7 @@
 #include "leds.h"
 #include "diag_page.h"
 #include "prompts.h"
+#include "audio.h"
 #include "selftest.h"
 #include "voicepack.h"
 #include "freertos/FreeRTOS.h"
@@ -519,6 +520,70 @@ static esp_err_t get_mic_test(httpd_req_t *req)
     return mic_test_json(req, ESP_OK);
 }
 
+static esp_err_t get_messages_json(httpd_req_t *req)
+{
+    cJSON *list = cJSON_CreateArray();
+    for (int i = 0; i < PROMPT_COUNT; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "id", prompts_id((prompt_t)i));
+        cJSON_AddStringToObject(o, "text", prompts_text((prompt_t)i));
+        cJSON_AddStringToObject(o, "source", prompts_is_recorded((prompt_t)i) ? "recorded" : "built-in");
+        cJSON_AddItemToArray(list, o);
+    }
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddItemToObject(r, "messages", list);
+    cJSON_AddStringToObject(r, "voice", settings_get_voice());
+    return send_json(req, r);
+}
+
+static volatile bool s_playing_all;
+
+static void play_all_task(void *arg)
+{
+    for (int i = 0; i < PROMPT_COUNT && s_playing_all; i++) {
+        prompts_say_always((prompt_t)i);
+        audio_wait_idle(10000);
+    }
+    s_playing_all = false;
+    vTaskDelete(NULL);
+}
+
+static esp_err_t post_play(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    char q[48] = "", id[24] = "";
+    httpd_req_get_url_query_str(req, q, sizeof(q));
+    httpd_query_key_value(q, "id", id, sizeof(id));
+    cJSON *r = cJSON_CreateObject();
+    if (strcmp(id, "all") == 0) {
+        if (!s_playing_all) {
+            s_playing_all = true;
+            if (xTaskCreate(play_all_task, "play_all", 3072, NULL, 3, NULL) != pdPASS) s_playing_all = false;
+        }
+        cJSON_AddBoolToObject(r, "ok", s_playing_all);
+        cJSON_AddStringToObject(r, "message", "Playing every message in order.");
+        return send_json(req, r);
+    }
+    if (strcmp(id, "stop") == 0) {
+        s_playing_all = false;
+        audio_flush_playback();
+        cJSON_AddBoolToObject(r, "ok", true);
+        cJSON_AddStringToObject(r, "message", "Stopped.");
+        return send_json(req, r);
+    }
+    for (int i = 0; i < PROMPT_COUNT; i++) {
+        if (strcmp(id, prompts_id((prompt_t)i)) == 0) {
+            prompts_say_always((prompt_t)i);
+            cJSON_AddBoolToObject(r, "ok", true);
+            cJSON_AddStringToObject(r, "message", "Playing.");
+            return send_json(req, r);
+        }
+    }
+    cJSON_AddBoolToObject(r, "ok", false);
+    cJSON_AddStringToObject(r, "message", "Unknown message.");
+    return send_json(req, r);
+}
+
 static void do_restart(TimerHandle_t t) { esp_restart(); }
 
 static esp_err_t post_reboot(httpd_req_t *req)
@@ -555,7 +620,7 @@ esp_err_t setup_web_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 10240;              // the API key test does a TLS handshake here
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 16;
+    cfg.max_uri_handlers = 24;
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
         return err;
@@ -572,6 +637,8 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
         { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
+        { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
+        { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
         { .uri = "/diag/mic-test",    .method = HTTP_GET,  .handler = get_mic_test },
     };
     httpd_register_uri_handler(s_server, &root);

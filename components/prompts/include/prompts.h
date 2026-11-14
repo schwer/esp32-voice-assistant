@@ -50,5 +50,8 @@ const char *prompts_list_raw(size_t *len);
 void prompts_use_recorded(bool on);
 void prompts_recorded_path(prompt_t p, char *buf, size_t len);
 
+/** True if the line will play from a recording in Gemini's voice (else built-in). */
+bool prompts_is_recorded(prompt_t p);
+
 /** Answer the wake word with a short, varied acknowledgement ("Yes?", ...). */
 void prompts_wake_ack(void);

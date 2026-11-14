@@ -1,5 +1,8 @@
 # esp32-voice-assistant
 
+**[Install or update the firmware in your browser →](https://schwer.github.io/esp32-voice-assistant/)**
+(Chrome or Edge on a computer, board connected by USB)
+
 An open-source, voice-only AI assistant for ESP32-S3 audio boards. It streams audio
 directly to a realtime speech-to-speech API (Gemini Live today) over a TLS WebSocket.
 There's no phone app and no cloud backend of your own.
@@ -81,9 +84,13 @@ CI regenerates the clips with Piper TTS when that file changes.
 
 ## Installing
 
-Open the web flasher (GitHub Pages for this repo) in desktop Chrome or Edge, connect the
-board over USB and click **Install**. You'll be asked for your Wi-Fi network right after
-flashing (Improv Wi-Fi). Then open the device's setup page to enter your API key.
+1. Open the [web installer](https://schwer.github.io/esp32-voice-assistant/) in desktop Chrome or Edge.
+2. Connect the board over USB and click **Install**. The latest firmware installs automatically;
+   updates keep your Wi-Fi and settings.
+3. Pick your Wi-Fi network from the list the board sees (2.4 GHz) and enter the password.
+4. Open the setup page link shown by the installer and paste your
+   [Gemini API key](https://aistudio.google.com/apikey).
+5. Say **"Jarvis"**.
 
 ## Building
 

@@ -128,6 +128,16 @@ void prompts_recorded_path(prompt_t p, char *buf, size_t len)
     snprintf(buf, len, PROMPTS_RECORDED_DIR "/%s.pcm", prompts_id(p));
 }
 
+bool prompts_is_recorded(prompt_t p)
+{
+    if (!s_use_recorded || p >= PROMPT_COUNT) return false;
+    char path[64];
+    prompts_recorded_path(p, path, sizeof(path));
+    FILE *f = fopen(path, "rb");
+    if (f) fclose(f);
+    return f != NULL;
+}
+
 /** Play a recording made in Gemini's voice, if there is one. */
 static bool play_recorded(prompt_t p)
 {
