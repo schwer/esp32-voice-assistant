@@ -6,4 +6,6 @@
 //       toolCall -> tool_handler -> toolResponse, goAway / session resumption.
 esp_err_t gemini_live_start(const gemini_live_config_t *cfg) { (void)cfg; return ESP_OK; }
 esp_err_t gemini_live_stop(void) { return ESP_OK; }
+esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t n) { (void)pcm; (void)n; return ESP_OK; }
+bool gemini_live_ready(void) { return false; }
 esp_err_t gemini_live_send_text(const char *text) { (void)text; return ESP_OK; }

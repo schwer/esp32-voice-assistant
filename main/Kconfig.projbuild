@@ -35,6 +35,22 @@ menu "Voice Assistant"
         string "Voice name"
         default "Puck"
 
+    config VA_WAKENET_KEYWORD
+        string "Wake word model keyword"
+        default "jarvis"
+        help
+            Substring used to pick the WakeNet model, e.g. "jarvis" for
+            wn9_jarvis_tts. The model itself must be enabled under
+            ESP Speech Recognition in menuconfig.
+
+    config VA_AFE_INPUT_FORMAT
+        string "AFE input channel layout"
+        default "MMNR"
+        help
+            One letter per I2S channel from the ES7210: M = microphone,
+            R = playback reference (for echo cancellation), N = unused.
+            TODO: verify against the board schematic.
+
     config VA_IDLE_TIMEOUT_S
         int "End session after N seconds of silence"
         default 20

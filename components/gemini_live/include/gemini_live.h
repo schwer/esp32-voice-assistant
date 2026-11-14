@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "cJSON.h"
 
@@ -16,5 +19,9 @@ typedef struct {
 /** Open the BidiGenerateContent WebSocket, send setup, start mic/speaker tasks. */
 esp_err_t gemini_live_start(const gemini_live_config_t *cfg);
 esp_err_t gemini_live_stop(void);
+/** Stream 16 kHz mono mic PCM (buffered until the session is ready). */
+esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t samples);
+/** True once setupComplete has been received. */
+bool gemini_live_ready(void);
 /** Send a text turn (used for spoken reminders). */
 esp_err_t gemini_live_send_text(const char *text);

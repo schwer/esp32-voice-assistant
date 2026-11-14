@@ -21,3 +21,7 @@ CONFIG_FREERTOS_HZ=1000
 # Power management (light sleep between audio frames where possible)
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
+# Speech recognition (ESP-SR): "Jarvis" wake word, models in the "model" partition
+CONFIG_MODEL_IN_FLASH=y
+CONFIG_SR_WN_WN9_JARVIS_TTS=y
