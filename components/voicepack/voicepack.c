@@ -257,7 +257,52 @@ static size_t resample(const int16_t *in, size_t n, int16_t *out)
     return o;
 }
 
-/** Trim silence, normalise loudness, fade the edges. */
+/** One biquad section (direct form I). */
+typedef struct { float b0, b1, b2, a1, a2, x1, x2, y1, y2; } biquad_t;
+
+static float biquad(biquad_t *f, float x)
+{
+    float y = f->b0 * x + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+    f->x2 = f->x1; f->x1 = x;
+    f->y2 = f->y1; f->y1 = y;
+    return y;
+}
+
+/**
+ * Same treatment as the built-in clips (tools/gen_prompts.py: speakerize):
+ * remove bass the small speaker can't play, +3 dB presence at 3 kHz, set the
+ * speech loudness to -13 dBFS, and soft-limit peaks.
+ */
+static void speakerize(int16_t *pcm, size_t n)
+{
+    const float fs = OUT_RATE, pi = 3.14159265f;
+    // 2nd-order Butterworth high-pass at 150 Hz (RBJ, Q = 0.7071)
+    float w0 = 2 * pi * 150 / fs, al = sinf(w0) / (2 * 0.7071f), c = cosf(w0), a0 = 1 + al;
+    biquad_t hp = { (1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0 };
+    // +3 dB peaking EQ at 3 kHz, Q = 1
+    float A = powf(10, 3.0f / 40), w1 = 2 * pi * 3000 / fs, al1 = sinf(w1) / 2, c1 = cosf(w1), d0 = 1 + al1 / A;
+    biquad_t pk = { (1 + al1 * A) / d0, -2 * c1 / d0, (1 - al1 * A) / d0, -2 * c1 / d0, (1 - al1 / A) / d0 };
+
+    float *f = heap_caps_malloc(n * sizeof(float), MALLOC_CAP_SPIRAM);
+    if (!f) return;
+    double sum = 0;
+    size_t cnt = 0;
+    for (size_t i = 0; i < n; i++) {
+        f[i] = biquad(&pk, biquad(&hp, pcm[i] / 32768.0f));
+        if (fabsf(f[i]) > 0.02f) { sum += (double)f[i] * f[i]; cnt++; }
+    }
+    float rms = cnt ? sqrtf((float)(sum / cnt)) : 1e-3f;
+    float gain = powf(10, -13.0f / 20) / fmaxf(rms, 1e-6f);
+    const float knee = 0.6f;
+    for (size_t i = 0; i < n; i++) {
+        float v = f[i] * gain, m = fabsf(v);
+        if (m > knee) v = copysignf(knee + 0.35f * tanhf((m - knee) / 0.35f), v);
+        pcm[i] = (int16_t)(v * 32767);
+    }
+    free(f);
+}
+
+/** Trim silence, make it clear on the speaker, fade the edges. */
 static size_t tidy(int16_t *pcm, size_t n)
 {
     const int thresh = 600;
@@ -270,16 +315,11 @@ static size_t tidy(int16_t *pcm, size_t n)
     n = end - start;
     memmove(pcm, pcm + start, n * sizeof(int16_t));
 
-    int peak = 1;
-    for (size_t i = 0; i < n; i++) if (abs(pcm[i]) > peak) peak = abs(pcm[i]);
-    float gain = 22936.0f / peak;                                   // -3 dBFS
+    speakerize(pcm, n);
     size_t fade = OUT_RATE / 100;
-    for (size_t i = 0; i < n; i++) {
-        float g = gain;
-        if (i < fade) g *= (float)i / fade;
-        if (n - i < fade) g *= (float)(n - i) / fade;
-        float v = pcm[i] * g;
-        pcm[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+    for (size_t i = 0; i < fade && i < n; i++) {
+        pcm[i] = (int16_t)(pcm[i] * (float)i / fade);
+        pcm[n - 1 - i] = (int16_t)(pcm[n - 1 - i] * (float)i / fade);
     }
     return n;
 }

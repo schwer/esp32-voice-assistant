@@ -29,13 +29,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install Piper TTS
-        run: python -m pip install "piper-tts==1.8.0" "soxr==0.5.0"
+        run: python -m pip install "piper-tts==1.8.0" "soxr==0.5.0" "scipy==1.18.1"
 
       - name: Download voice (LJ Speech, public domain dataset)
-        run: python -m piper.download_voices --data-dir voices en_US-ljspeech-medium
+        run: python -m piper.download_voices --data-dir voices en_US-ljspeech-high
 
       - name: Generate clips
-        run: python tools/gen_prompts.py voices/en_US-ljspeech-medium.onnx tools/prompts.tsv components/prompts/clips
+        run: python tools/gen_prompts.py voices/en_US-ljspeech-high.onnx tools/prompts.tsv components/prompts/clips
 
       - name: Commit clips
         run: |
