@@ -39,13 +39,18 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 | `components/storage` | LittleFS on the `storage` partition at `/data` |
 | `components/conversations` | Saved conversations: rolling transcript, save/list/load/delete |
 | `components/diag` | Diagnostics: log capture, health snapshot, API key check (`/diag`) |
+| `components/prompts` | Pre-recorded spoken status messages (offline) |
 | `components/audio` | Codec, I2S capture/playback, AEC, playback flush |
 | `components/gemini_live` | WebSocket session, setup, audio streaming, tool calls, resumption |
 | `components/tools` | Function declarations + dispatch |
 | `components/appointments` | Persistent store, summaries, reminders |
 | `components/setup_web` | Local setup UI, `.ics` export, future OAuth callback |
 
-## Lights
+## Lights and spoken status
+
+The device also says what's happening ("I need Wi-Fi", "Ready. Say Jarvis when you need me.",
+"Settings saved", ...). Turn this off on the setup page. Phrases live in `tools/prompts.tsv`;
+CI regenerates the clips with Piper TTS when that file changes.
 
 | Pattern | Meaning |
 |---|---|

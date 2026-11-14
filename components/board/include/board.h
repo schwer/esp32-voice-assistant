@@ -25,6 +25,7 @@
 
 // TCA9555 IO expander pins (unverified)
 #define BOARD_EXP_PA_ENABLE     8    // speaker amplifier enable
+#define BOARD_EXP_PA_ENABLE_MASK (1u << BOARD_EXP_PA_ENABLE)
 
 // RGB LED ring: 7 x WS2812 (GPIO from the ESPHome device page; verify on schematic)
 #define BOARD_LED_GPIO          38

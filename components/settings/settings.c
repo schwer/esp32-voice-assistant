@@ -11,6 +11,7 @@ static const char *TAG = "settings";
 static char s_tz[SETTINGS_TZ_MAX];
 static char s_name[SETTINGS_NAME_MAX];
 static char s_key[SETTINGS_API_KEY_MAX];
+static bool s_spoken = true;
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
 {
@@ -30,6 +31,9 @@ esp_err_t settings_init(void)
     load(h, "tz", s_tz, sizeof(s_tz), CONFIG_VA_TIMEZONE);
     load(h, "name", s_name, sizeof(s_name), "Jarvis");
     load(h, "api_key", s_key, sizeof(s_key), CONFIG_VA_GEMINI_API_KEY);
+    uint8_t spoken = 1;
+    nvs_get_u8(h, "spoken", &spoken);
+    s_spoken = spoken != 0;
     nvs_close(h);
     ESP_LOGI(TAG, "tz=%s name=%s api_key=%s", s_tz, s_name, s_key[0] ? "set" : "missing");
     return ESP_OK;
@@ -78,3 +82,17 @@ void settings_api_key_hint(char *buf, size_t len)
 esp_err_t settings_set_tz(const char *tz)     { return save("tz", tz, s_tz, sizeof(s_tz)); }
 esp_err_t settings_set_name(const char *name) { return save("name", name, s_name, sizeof(s_name)); }
 esp_err_t settings_set_api_key(const char *k) { return save("api_key", k, s_key, sizeof(s_key)); }
+
+bool settings_get_spoken_status(void) { return s_spoken; }
+
+esp_err_t settings_set_spoken_status(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, "spoken", on ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err == ESP_OK) s_spoken = on;
+    return err;
+}

@@ -37,6 +37,7 @@ static const char DIAG_PAGE[] =
 "<div class='card'><h2>Tests</h2>"
 "<button class=primary data-act='test-gemini'>Test Gemini API key</button>"
 
+"<button data-act='speaker-test'>Test speaker</button>"
 "<button data-act='reboot'>Reboot</button>"
 "<div id=result class=muted></div></div>"
 "<div class=grid id=sections></div>"

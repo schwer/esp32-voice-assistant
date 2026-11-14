@@ -23,3 +23,7 @@ void settings_api_key_hint(char *buf, size_t len);
 esp_err_t settings_set_tz(const char *tz);
 esp_err_t settings_set_name(const char *name);
 esp_err_t settings_set_api_key(const char *key);
+
+/** Spoken status messages ("I need Wi-Fi", "Settings saved", ...). Default on. */
+bool settings_get_spoken_status(void);
+esp_err_t settings_set_spoken_status(bool on);

@@ -21,6 +21,7 @@
 #include "diag.h"
 #include "leds.h"
 #include "diag_page.h"
+#include "prompts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -164,6 +165,7 @@ static const char PAGE_HEAD[] =
 ".card{background:var(--card);border:1px solid var(--border);border-radius:12px;"
 "padding:20px;margin:20px 0}"
 "label{display:block;font-weight:600;margin:16px 0 6px}"
+"label.check{display:flex;align-items:center;gap:10px}label.check input{width:auto;margin:0}"
 "input,select{width:100%;box-sizing:border-box;padding:10px 12px;font:inherit;"
 "color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:8px}"
 "button{margin-top:20px;padding:10px 18px;font:inherit;font-weight:600;border:0;"
@@ -243,6 +245,12 @@ static esp_err_t get_root(httpd_req_t *req)
     send_escaped(req, settings_get_name());
     SEND(req, "\"><p class=note>What the assistant calls itself. The wake word stays \"Jarvis\".</p>");
 
+    SEND(req, "<input type=hidden name=spoken_present value=1>"
+              "<label class=check><input type=checkbox name=spoken value=1");
+    if (settings_get_spoken_status()) SEND(req, " checked");
+    SEND(req, "> Speak status messages</label>"
+              "<p class=note>Say what the lights mean, e.g. \"I need Wi-Fi\" or \"Settings saved\".</p>");
+
     SEND(req, "<button type=submit>Save</button></form>");
 
     const esp_app_desc_t *app = esp_app_get_description();
@@ -295,10 +303,15 @@ static esp_err_t post_save(httpd_req_t *req)
     if (form_field(body, "name", val, sizeof(val)) && val[0]) {
         err |= settings_set_name(val);
     }
+    if (form_field(body, "spoken_present", val, sizeof(val))) {
+        bool on = form_field(body, "spoken", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_spoken_status(on);
+    }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));
     if (err == ESP_OK) {
         leds_event(LEDS_EVENT_SAVED);
+        prompts_say(PROMPT_SETTINGS_SAVED);
         if (leds_get() == LEDS_SETUP_NEEDED && settings_has_api_key() && net_is_connected()) {
             leds_set(LEDS_OFF);
         }
@@ -401,6 +414,17 @@ static esp_err_t post_led_preview(httpd_req_t *req)
     return send_json(req, r);
 }
 
+static esp_err_t post_speaker_test(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    prompts_say_always(PROMPT_SPEAKER_TEST);
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    cJSON_AddStringToObject(r, "message",
+        "Playing a test message. If you hear nothing, check the Speaker line under Modules.");
+    return send_json(req, r);
+}
+
 static void do_restart(TimerHandle_t t) { esp_restart(); }
 
 static esp_err_t post_reboot(httpd_req_t *req)
@@ -452,6 +476,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/leds.json",   .method = HTTP_GET,  .handler = get_leds_json },
         { .uri = "/diag/led-preview", .method = HTTP_POST, .handler = post_led_preview },
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
+        { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
     };
     httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &save);

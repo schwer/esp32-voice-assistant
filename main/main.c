@@ -19,6 +19,7 @@
 #include "storage.h"
 #include "conversations.h"
 #include "diag.h"
+#include "prompts.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -89,6 +90,16 @@ void app_main(void)
     tzset();
     // TODO: restore time from the PCF85063 RTC
 
+    // Speaker early, so status messages work during setup. Audio failures are
+    // logged, not fatal: a reboot loop would hide the setup page.
+    esp_err_t aerr = audio_init();
+    if (aerr == ESP_OK) {
+        prompts_init();
+        diag_set_status("speaker", "ok");
+    } else {
+        diag_set_status("speaker", esp_err_to_name(aerr));
+    }
+
     ESP_ERROR_CHECK(net_init());
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
 
@@ -117,6 +128,12 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     leds_set(idle_state());
+    // Say what the light means.
+    prompts_say(!online ? PROMPT_NEED_WIFI
+              : !settings_has_api_key() ? PROMPT_NEED_API_KEY
+              : PROMPT_READY);
+    bool was_online = online;
+    bool wifi_expected = true;                 // false while Wi-Fi is off to save battery
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
@@ -126,19 +143,20 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(appointments_init());
 
-    // Audio problems are logged, not fatal: a reboot loop would hide the setup page.
+    // Wake word needs the microphones.
     wakeword_config_t wcfg = { .on_wake = on_wake, .on_audio = on_audio };
-    esp_err_t aerr = audio_init();
-    if (aerr == ESP_OK) {
+    if (aerr == ESP_OK && audio_mic_ready()) {
         aerr = wakeword_start(&wcfg);
+    } else if (aerr == ESP_OK) {
+        aerr = ESP_ERR_NOT_SUPPORTED;
     }
     if (aerr != ESP_OK) {
-        ESP_LOGW(TAG, "audio/wake word not running (%s); setup page still available",
+        ESP_LOGW(TAG, "wake word not running (%s); setup page still available",
                  esp_err_to_name(aerr));
-        diag_set_status("audio", aerr == ESP_ERR_NOT_SUPPORTED ? "not implemented yet" : esp_err_to_name(aerr));
-        diag_set_status("wake word", "waiting for audio");
+        diag_set_status("microphones", "not implemented yet");
+        diag_set_status("wake word", "waiting for microphones");
     } else {
-        diag_set_status("audio", "ok");
+        diag_set_status("microphones", "ok");
         diag_set_status("wake word", "listening for \"Jarvis\"");
     }
     diag_set_status("gemini", "not implemented yet");
@@ -152,7 +170,14 @@ void app_main(void)
                 leds_state_t want = idle_state();
                 if (want != cur) leds_set(want);
             }
-            diag_set_status("wifi", net_is_connected() ? "connected" : "not connected (retrying)");
+            bool now_online = net_is_connected();
+            diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
+            if (wifi_expected && was_online && !now_online) {
+                prompts_say(PROMPT_WIFI_LOST);
+            } else if (!was_online && now_online) {
+                prompts_say(settings_has_api_key() ? PROMPT_WIFI_BACK : PROMPT_NEED_API_KEY);
+            }
+            was_online = now_online;
             static int ticks;
             if (!net_is_connected() || ++ticks % 12 == 0) {
                 net_log_status();          // every 5 s while offline, every minute when online
@@ -164,11 +189,14 @@ void app_main(void)
             ESP_LOGI(TAG, "wake: starting conversation");
             leds_set(LEDS_CONNECTING);
             // TODO: chime, SNTP if stale
+            wifi_expected = true;
             if (net_connect(8000) != ESP_OK) {
-                ESP_LOGW(TAG, "no Wi-Fi");      // TODO: spoken error
+                ESP_LOGW(TAG, "no Wi-Fi");
                 leds_set(LEDS_ERROR);
+                prompts_say(PROMPT_NO_INTERNET);
                 break;
             }
+            was_online = true;
             conversations_session_begin();
             wakeword_converse();                       // audio now flows to Gemini (buffered)
             gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
@@ -177,6 +205,7 @@ void app_main(void)
             cfg.system_instruction_extra = appointments_summary(14);
             if (gemini_live_start(&cfg) != ESP_OK) {
                 leds_set(LEDS_ERROR);
+                prompts_say(PROMPT_GEMINI_FAILED);
                 wakeword_listen();
             }
             break;
@@ -185,7 +214,9 @@ void app_main(void)
             gemini_live_stop();
             leds_set(idle_state());
 #if CONFIG_VA_WIFI_OFF_WHEN_IDLE
+            wifi_expected = false;
             net_disconnect();
+            was_online = false;
 #endif
             wakeword_listen();
             break;
