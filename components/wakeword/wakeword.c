@@ -77,6 +77,15 @@ static void fetch_task(void *arg)
             capture_frame(res->data, res->data_size / sizeof(int16_t), res->vad_state == VAD_SPEECH);
             continue;
         }
+        // Ignore detections while (or just after) the speaker plays: the device
+        // says "Jarvis" itself in some messages.
+        static TickType_t last_playing;
+        if (audio_is_playing()) last_playing = xTaskGetTickCount();
+        bool own_voice = xTaskGetTickCount() - last_playing < pdMS_TO_TICKS(600);
+        if (!s_conversing && res->wakeup_state == WAKENET_DETECTED && own_voice) {
+            ESP_LOGI(TAG, "ignored wake word from our own speaker");
+            continue;
+        }
         if (!s_conversing && res->wakeup_state == WAKENET_DETECTED) {
             ESP_LOGI(TAG, "wake word detected");
             if (s_cfg.on_wake) {

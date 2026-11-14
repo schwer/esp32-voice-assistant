@@ -256,6 +256,13 @@ void app_main(void)
             bool now_online = net_is_connected();
             diag_set_status("wifi", now_online ? "connected" : "not connected (retrying)");
             prompt_t reason = PROMPT_COUNT;
+            // Brief drops (switching networks, a router hiccup) aren't worth announcing:
+            // only treat Wi-Fi as lost after two checks in a row (~10 s).
+            static int offline_checks;
+            offline_checks = now_online ? 0 : offline_checks + 1;
+            if (!now_online && offline_checks < 2) {
+                continue;
+            }
             if (wifi_expected && was_online && !now_online) {
                 reason = PROMPT_WIFI_LOST;
             } else if (!was_online && now_online && settings_has_api_key()) {

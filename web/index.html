@@ -185,7 +185,10 @@ class Improv {
 
   async open() {
     await this.port.open({ baudRate: 115200 });
-    try { await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch {}
+    // Release RTS before DTR: on native-USB boards the brief "RTS on, DTR off"
+    // combination is the chip-reset signal, which would restart the board.
+    try { await this.port.setSignals({ requestToSend: false }); } catch {}
+    try { await this.port.setSignals({ dataTerminalReady: false }); } catch {}
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
     this.closed = false;
@@ -304,7 +307,8 @@ class Improv {
 // ---------------------------------------------------------------- flashing (esptool-js)
 let manifest;
 async function loadManifest() {
-  if (!manifest) manifest = await (await fetch("manifest.json", { cache: "no-store" })).json();
+  // The query string defeats GitHub Pages' CDN cache, so we always see the newest build.
+  if (!manifest) manifest = await (await fetch(`manifest.json?t=${Date.now()}`, { cache: "no-store" })).json();
   return manifest;
 }
 
@@ -322,7 +326,7 @@ async function flash(port, { eraseAll = false } = {}) {
   const parts = m.builds[0].parts;
   const files = [];
   for (const p of parts) {
-    const res = await fetch(p.path, { cache: "no-store" });
+    const res = await fetch(`${p.path}?v=${encodeURIComponent(m.build || m.version)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`couldn't download ${p.path}`);
     files.push({ address: p.offset, data: new Uint8Array(await res.arrayBuffer()) });
   }
@@ -440,10 +444,10 @@ async function refreshStatus({ waitForWifi = false } = {}) {
   const info = await improv.info(4000);
   let st = await improv.status();
   // After a restart the board needs a few seconds to rejoin its saved network.
-  if (waitForWifi && st && !st.ssid && st.saved) {
-    const until = Date.now() + 30000;
+  if (waitForWifi && st && !st.ssid && st.saved !== "") {
+    const until = Date.now() + (st.saved ? 30000 : 12000);
     while (Date.now() < until && st && !st.ssid) {
-      step(`Waiting for the board to rejoin "${st.saved}"…`);
+      step(st.saved ? `Waiting for the board to rejoin "${st.saved}"…` : "Waiting for the board to join Wi-Fi…");
       await sleep(1500);
       st = (await improv.status()) || st;
     }
@@ -482,7 +486,11 @@ async function start({ eraseAll = false } = {}) {
       port = improv.port;
       const after = await improv.info(15000);
       if (!after) throw new Error("the new firmware didn't respond. Check the board log below");
-      step(info ? "Updated to the latest firmware. Your settings were kept." : "Installed.", "ok");
+      if (!isCurrent(after, manifest)) {
+        throw new Error(`the board is still running ${after.version} instead of ${manifest.build}. ` +
+                        "Unplug it, plug it back in and click Connect again");
+      }
+      step(info ? `Updated to ${after.version}. Your settings were kept.` : "Installed.", "ok");
     }
 
     const before = $("step").textContent, cls = $("step").className;

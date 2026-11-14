@@ -88,6 +88,14 @@ esp_err_t net_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL));
+    // Networks saved by older firmware: prefer the strongest access point too.
+    wifi_config_t saved = {0};
+    if (esp_wifi_get_config(WIFI_IF_STA, &saved) == ESP_OK && saved.sta.ssid[0] &&
+        (saved.sta.scan_method != WIFI_ALL_CHANNEL_SCAN || saved.sta.sort_method != WIFI_CONNECT_AP_BY_SIGNAL)) {
+        saved.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+        saved.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+        esp_wifi_set_config(WIFI_IF_STA, &saved);
+    }
     const esp_timer_create_args_t targs = { .callback = retry_cb, .name = "wifi_retry" };
     ESP_ERROR_CHECK(esp_timer_create(&targs, &s_retry_timer));
     return ESP_OK;
@@ -136,6 +144,8 @@ esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms)
     strlcpy((char *)c.sta.password, password, sizeof(c.sta.password));
     c.sta.threshold.authmode = password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
+    c.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;        // several access points can share a name:
+    c.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;    // join the strongest, not the first found
     c.sta.pmf_cfg.capable = true;                    // allow WPA2/WPA3 mixed networks
     c.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;            // and WPA3-only networks
 
