@@ -15,3 +15,6 @@ wake_ack_1	Yes?
 wake_ack_2	I'm listening.
 wake_ack_3	How can I help?
 not_ready	I heard you, but I can't hold conversations yet. That part is still being built.
+mic_test_start	Microphone test. Say hi.
+mic_test_hello	Hello! I heard you. Here's what you said.
+mic_test_nothing	I didn't hear anything. Check the microphone levels on the diagnostics page.
