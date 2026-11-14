@@ -34,6 +34,8 @@ static void on_wake(void *ctx)
     xQueueSend(s_events, &ev, 0);
 }
 
+static leds_state_t idle_state(void);
+
 static void on_gemini_state(gemini_state_t st, void *ctx)
 {
     switch (st) {
