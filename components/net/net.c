@@ -8,6 +8,7 @@
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "net.h"
 
 static const char *TAG = "net";
@@ -18,13 +19,39 @@ static const char *TAG = "net";
 static EventGroupHandle_t s_events;
 static esp_netif_t *s_netif;
 static bool s_started;
+static volatile bool s_want;          // we want to be online (not powered down for battery)
+static int s_attempts;
+static esp_timer_handle_t s_retry_timer;
+
+#define FAST_RETRIES   5              // quick retries before reporting failure
+#define RETRY_DELAY_US (10 * 1000 * 1000)
+
+static void retry_cb(void *arg)
+{
+    if (s_want && s_started) {
+        esp_wifi_connect();
+    }
+}
 
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *d = data;
         xEventGroupClearBits(s_events, BIT_CONNECTED);
-        xEventGroupSetBits(s_events, BIT_FAILED);
+        if (!s_want) {
+            return;
+        }
+        s_attempts++;
+        ESP_LOGW(TAG, "disconnected (reason %d), attempt %d", d->reason, s_attempts);
+        if (s_attempts < FAST_RETRIES) {
+            esp_wifi_connect();                       // transient failures are common
+        } else {
+            xEventGroupSetBits(s_events, BIT_FAILED); // tell waiters, keep trying slowly
+            esp_timer_start_once(s_retry_timer, RETRY_DELAY_US);
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        s_attempts = 0;
+        ESP_LOGI(TAG, "connected");
         xEventGroupClearBits(s_events, BIT_FAILED);
         xEventGroupSetBits(s_events, BIT_CONNECTED);
         static bool sntp_started;
@@ -53,6 +80,8 @@ esp_err_t net_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL));
+    const esp_timer_create_args_t targs = { .callback = retry_cb, .name = "wifi_retry" };
+    ESP_ERROR_CHECK(esp_timer_create(&targs, &s_retry_timer));
     return ESP_OK;
 }
 
@@ -65,6 +94,9 @@ bool net_has_credentials(void)
 static esp_err_t start_and_wait(int timeout_ms)
 {
     xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_FAILED);
+    s_want = true;
+    s_attempts = 0;
+    esp_timer_stop(s_retry_timer);
     if (!s_started) {
         ESP_ERROR_CHECK(esp_wifi_start());
         s_started = true;
@@ -103,13 +135,20 @@ esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms)
     esp_err_t err = start_and_wait(timeout_ms);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not join '%s', restoring previous settings", ssid);
+        esp_wifi_disconnect();
         esp_wifi_set_config(WIFI_IF_STA, &old);
+        if (old.sta.ssid[0]) {
+            s_attempts = 0;
+            esp_wifi_connect();                       // back to the previous network
+        }
     }
     return err;
 }
 
 void net_disconnect(void)
 {
+    s_want = false;
+    esp_timer_stop(s_retry_timer);
     if (s_started) {
         esp_wifi_disconnect();
         esp_wifi_stop();

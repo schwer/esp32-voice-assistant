@@ -104,6 +104,7 @@ esp_err_t leds_init(void)
         .strip_gpio_num = BOARD_LED_GPIO,
         .max_leds = BOARD_LED_COUNT,
         .led_model = LED_MODEL_WS2812,
+        .color_component_format = BOARD_LED_COLOR_FORMAT,
     };
     led_strip_rmt_config_t rmt_cfg = {
         .resolution_hz = 10 * 1000 * 1000,

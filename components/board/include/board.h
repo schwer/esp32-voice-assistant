@@ -29,6 +29,9 @@
 // RGB LED ring: 7 x WS2812 (GPIO from the ESPHome device page; verify on schematic)
 #define BOARD_LED_GPIO          38
 #define BOARD_LED_COUNT         7
+// Color byte order. Standard WS2812 is GRB, but red showed up as green on the
+// reference board, so its LEDs take RGB.
+#define BOARD_LED_COLOR_FORMAT  LED_STRIP_COLOR_COMPONENT_FMT_RGB
 
 // Both codecs share MCLK/BCLK/WS, so capture and playback run at ONE rate.
 // Mic audio goes to the AFE and Gemini at 16 kHz as-is; Gemini's 24 kHz
