@@ -283,8 +283,11 @@ cJSON *diag_test_gemini(void)
                                 "Make sure Wi-Fi is connected and try again in a minute.");
     }
 
+    char url[160];
+    snprintf(url, sizeof(url), "https://generativelanguage.googleapis.com/v1beta/models/%s",
+             settings_get_model());
     esp_http_client_config_t cfg = {
-        .url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+        .url = url,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 10000,
     };
@@ -302,7 +305,17 @@ cJSON *diag_test_gemini(void)
     }
     ESP_LOGI(TAG, "Gemini check: HTTP %d", status);
     switch (status) {
-    case 200: return result(true, status, "API key works.");
+    case 200: {
+        char msg[120];
+        snprintf(msg, sizeof(msg), "API key works, and the model \"%s\" is available.", settings_get_model());
+        return result(true, status, msg);
+    }
+    case 404: {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "The key works, but Google doesn't know the model \"%s\". "
+                 "Check the model name on the setup page.", settings_get_model());
+        return result(false, status, msg);
+    }
     case 400: return result(false, status, "Google rejected the key. Check it was copied completely.");
     case 401:
     case 403: return result(false, status, "Key not authorized. It may be deleted or restricted to other APIs.");

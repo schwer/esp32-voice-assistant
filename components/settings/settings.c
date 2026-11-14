@@ -12,6 +12,8 @@ static char s_tz[SETTINGS_TZ_MAX];
 static char s_name[SETTINGS_NAME_MAX];
 static char s_key[SETTINGS_API_KEY_MAX];
 static bool s_spoken = true;
+static char s_model[SETTINGS_MODEL_MAX];
+static char s_voice[SETTINGS_VOICE_MAX];
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
 {
@@ -31,6 +33,8 @@ esp_err_t settings_init(void)
     load(h, "tz", s_tz, sizeof(s_tz), CONFIG_VA_TIMEZONE);
     load(h, "name", s_name, sizeof(s_name), "Jarvis");
     load(h, "api_key", s_key, sizeof(s_key), CONFIG_VA_GEMINI_API_KEY);
+    load(h, "model", s_model, sizeof(s_model), CONFIG_VA_GEMINI_MODEL);
+    load(h, "voice", s_voice, sizeof(s_voice), CONFIG_VA_VOICE_NAME);
     uint8_t spoken = 1;
     nvs_get_u8(h, "spoken", &spoken);
     s_spoken = spoken != 0;
@@ -96,3 +100,8 @@ esp_err_t settings_set_spoken_status(bool on)
     if (err == ESP_OK) s_spoken = on;
     return err;
 }
+
+const char *settings_get_model(void) { return s_model; }
+const char *settings_get_voice(void) { return s_voice; }
+esp_err_t settings_set_model(const char *m) { return save("model", m, s_model, sizeof(s_model)); }
+esp_err_t settings_set_voice(const char *v) { return save("voice", v, s_voice, sizeof(s_voice)); }

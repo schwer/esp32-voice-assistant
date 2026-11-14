@@ -246,6 +246,32 @@ static esp_err_t get_root(httpd_req_t *req)
     send_escaped(req, settings_get_name());
     SEND(req, "\"><p class=note>What the assistant calls itself. The wake word stays \"Jarvis\".</p>");
 
+    static const char *const VOICES[] = { "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr" };
+    SEND(req, "<label for=voice>Voice</label><select id=voice name=voice>");
+    const char *cur_voice = settings_get_voice();
+    bool voice_found = false;
+    for (size_t i = 0; i < sizeof(VOICES) / sizeof(VOICES[0]); i++) {
+        bool sel = strcmp(cur_voice, VOICES[i]) == 0;
+        voice_found |= sel;
+        SEND(req, "<option");
+        if (sel) SEND(req, " selected");
+        SEND(req, ">");
+        SEND(req, VOICES[i]);
+        SEND(req, "</option>");
+    }
+    if (!voice_found) {
+        SEND(req, "<option selected>");
+        send_escaped(req, cur_voice);
+        SEND(req, "</option>");
+    }
+    SEND(req, "</select><p class=note>Gemini's speaking voice. Takes effect on the next conversation.</p>");
+
+    SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
+              "spellcheck=false autocomplete=off value=\"");
+    send_escaped(req, settings_get_model());
+    SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini API key</em> "
+              "on the diagnostics page to check it.</p>");
+
     SEND(req, "<input type=hidden name=spoken_present value=1>"
               "<label class=check><input type=checkbox name=spoken value=1");
     if (settings_get_spoken_status()) SEND(req, " checked");
@@ -272,7 +298,7 @@ static esp_err_t post_save(httpd_req_t *req)
     if (!same_origin(req)) {
         return forbid(req);
     }
-    char body[512];
+    char body[1024];
     if (req->content_len >= sizeof(body)) {
         httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "Too large");
         return ESP_FAIL;
@@ -303,6 +329,13 @@ static esp_err_t post_save(httpd_req_t *req)
     }
     if (form_field(body, "name", val, sizeof(val)) && val[0]) {
         err |= settings_set_name(val);
+    }
+    if (form_field(body, "voice", val, sizeof(val)) && val[0]) {
+        err |= settings_set_voice(val);
+    }
+    if (form_field(body, "model", val, sizeof(val)) && val[0]) {
+        const char *m = strncmp(val, "models/", 7) == 0 ? val + 7 : val;   // accept either form
+        err |= settings_set_model(m);
     }
     if (form_field(body, "spoken_present", val, sizeof(val))) {
         bool on = form_field(body, "spoken", val, sizeof(val)) && strcmp(val, "1") == 0;

@@ -25,7 +25,13 @@
 
 static const char *TAG = "main";
 
-typedef enum { EV_WAKE, EV_SESSION_ENDED } app_event_t;
+#ifdef CONFIG_VA_BARGE_IN
+#define BARGE_IN true
+#else
+#define BARGE_IN false
+#endif
+
+typedef enum { EV_WAKE, EV_SESSION_ENDED, EV_SESSION_FAILED, EV_END_REQUESTED } app_event_t;
 static QueueHandle_t s_events;
 
 static void on_wake(void *ctx)
@@ -37,15 +43,56 @@ static void on_wake(void *ctx)
 
 static leds_state_t idle_state(void);
 
+static void post(app_event_t ev)
+{
+    xQueueSend(s_events, &ev, 0);
+}
+
 static void on_gemini_state(gemini_state_t st, void *ctx)
 {
     switch (st) {
     case GEMINI_STATE_CONNECTING:     leds_set(LEDS_CONNECTING); break;
     case GEMINI_STATE_READY:          leds_set(LEDS_LISTENING);  break;   // ready for your voice
     case GEMINI_STATE_MODEL_SPEAKING: leds_set(LEDS_SPEAKING);   break;
-    case GEMINI_STATE_CLOSED:         leds_set(idle_state());    break;
-    case GEMINI_STATE_ERROR:          leds_set(LEDS_ERROR);      break;
+    case GEMINI_STATE_CLOSED:         post(EV_SESSION_ENDED);    break;
+    case GEMINI_STATE_ERROR:          post(EV_SESSION_FAILED);   break;
     }
+}
+
+static void on_transcript(const char *role, const char *text, void *ctx)
+{
+    ESP_LOGI(TAG, "%s: %s", role, text);
+    conversations_add_text(role, text);
+}
+
+/** System instruction for each conversation: persona, today's date, tool guidance, memory. */
+static char *build_instruction(void)
+{
+    char now[64] = "unknown";
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    if (tm.tm_year > 120) strftime(now, sizeof(now), "%A %d %B %Y, %H:%M", &tm);
+
+    char *appts = appointments_summary(14);
+    const char *tools = tools_system_instruction();
+    size_t len = 2048 + strlen(tools) + (appts ? strlen(appts) : 0);
+    char *buf = malloc(len);
+    if (buf) {
+        snprintf(buf, len,
+            "You are %s, a friendly voice assistant running on a small speaker in the user's home. "
+            "The user talks to you out loud and hears your replies, so speak naturally and keep "
+            "answers short: one to three sentences unless they ask for more. Never use lists, "
+            "markdown, emojis or URLs. The user wakes you by saying \"Jarvis\".\n"
+            "Current local date and time: %s (time zone %s).\n"
+            "When the user says goodbye, thanks you to finish, or says they're done, say a very "
+            "short goodbye and then call end_conversation.\n"
+            "%s%s%s",
+            settings_get_name(), now, settings_get_tz(), tools,
+            appts ? "\nUpcoming appointments:\n" : "", appts ? appts : "");
+    }
+    free(appts);
+    return buf;
 }
 
 /** Idle light: dark when everything's ready, amber blink when setup is missing. */
@@ -86,6 +133,12 @@ static void on_light_change(leds_state_t from, leds_state_t to)
 /** Wraps tool calls with light feedback (thinking, then saved/deleted). */
 static cJSON *tool_handler(const char *name, const cJSON *args)
 {
+    if (strcmp(name, "end_conversation") == 0) {
+        post(EV_END_REQUESTED);              // after the goodbye has played
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddBoolToObject(r, "ok", true);
+        return r;
+    }
     leds_set(LEDS_THINKING);
     cJSON *r = tools_handle_call(name, args);
     bool failed = cJSON_GetObjectItem(r, "error") != NULL;
@@ -109,9 +162,7 @@ static void back_to_listening(void)
 
 static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 {
-    // TODO: track silence for CONFIG_VA_IDLE_TIMEOUT_S, then post EV_SESSION_ENDED
-    (void)speech;
-    gemini_live_send_audio(pcm, samples);
+    gemini_live_send_audio(pcm, samples, speech);   // the client tracks the idle timeout
 }
 
 void app_main(void)
@@ -197,7 +248,7 @@ void app_main(void)
         diag_set_status("microphones", "ok");
         diag_set_status("wake word", "listening for \"Jarvis\"");
     }
-    diag_set_status("gemini", "conversations not implemented yet");
+    diag_set_status("gemini", "idle");
 
     for (;;) {
         app_event_t ev;
@@ -242,33 +293,60 @@ void app_main(void)
                 break;
             }
             was_online = true;
-            conversations_session_begin();             // audio now flows to Gemini (buffered)
-            gemini_live_config_t cfg = GEMINI_LIVE_CONFIG_DEFAULT();
-            cfg.tool_handler = tool_handler;
-            cfg.on_state = on_gemini_state;
-            cfg.system_instruction_extra = appointments_summary(14);
-            esp_err_t gerr = gemini_live_start(&cfg);
-            if (gerr == ESP_ERR_NOT_SUPPORTED) {
-                // Conversations aren't built yet: say so, then listen for "Jarvis" again.
-                leds_set(LEDS_SPEAKING);
-                prompts_say_always(PROMPT_NOT_READY);
+            if (!settings_has_api_key()) {
+                set_light(LEDS_SETUP_NEEDED, PROMPT_NEED_API_KEY);
                 back_to_listening();
-            } else if (gerr != ESP_OK) {
+                break;
+            }
+            conversations_session_begin();             // audio now flows to Gemini (buffered)
+            char key[SETTINGS_API_KEY_MAX];
+            settings_get_api_key(key, sizeof(key));
+            char *instruction = build_instruction();
+            gemini_live_config_t cfg = {
+                .api_key = key,
+                .model = settings_get_model(),
+                .voice = settings_get_voice(),
+                .system_instruction = instruction,
+                .tools = tools_declarations(),
+                .tool_handler = tool_handler,
+                .on_state = on_gemini_state,
+                .on_transcript = on_transcript,
+                .idle_timeout_s = CONFIG_VA_IDLE_TIMEOUT_S,
+                .barge_in = BARGE_IN,
+            };
+            esp_err_t gerr = gemini_live_start(&cfg);
+            memset(key, 0, sizeof(key));
+            free(instruction);
+            diag_set_status("gemini", gerr == ESP_OK ? "connecting" : esp_err_to_name(gerr));
+            if (gerr != ESP_OK) {
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 back_to_listening();
             }
             break;
         }
+        case EV_END_REQUESTED:
+            audio_wait_idle(15000);                    // let the goodbye finish
+            /* fall through */
         case EV_SESSION_ENDED:
             gemini_live_stop();
-            leds_set(idle_state());
+            diag_set_status("gemini", "idle (last conversation ended normally)");
+            ESP_LOGI(TAG, "conversation ended");
 #if CONFIG_VA_WIFI_OFF_WHEN_IDLE
             wifi_expected = false;
             net_disconnect();
             was_online = false;
 #endif
-            wakeword_listen();
+            back_to_listening();
             break;
+        case EV_SESSION_FAILED: {
+            char why[128];
+            snprintf(why, sizeof(why), "failed: %s", gemini_live_last_error());
+            diag_set_status("gemini", why);
+            gemini_live_stop();
+            set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
+            back_to_listening();
+            break;
+        }
         }
     }
 }

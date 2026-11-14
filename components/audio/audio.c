@@ -19,7 +19,7 @@
 
 static const char *TAG = "audio";
 
-#define PLAY_BUF_BYTES   (32 * 1024)     // ~1 s at 16 kHz mono
+#define PLAY_BUF_BYTES   (512 * 1024)    // ~16 s at 16 kHz mono (Gemini sends faster than real time)
 #define CHUNK_BYTES      1024
 #define PA_IDLE_OFF_MS   1500            // amp off after this much silence (no hiss, saves power)
 #define DEFAULT_VOLUME   70
@@ -311,16 +311,46 @@ esp_err_t audio_play_16k(const int16_t *pcm, size_t samples)
     return ESP_OK;
 }
 
+// 24 kHz -> 16 kHz: step 1.5 input samples per output sample, with a light
+// 3-tap low-pass first so the 8-12 kHz band doesn't alias into speech.
+static float s_rs_pos;                 // position into the next block (in input samples)
+static int16_t s_rs_hist[2];           // last two input samples of the previous block
+
 esp_err_t audio_play(const int16_t *pcm, size_t samples)
 {
-    // TODO(gemini): 24 kHz -> 16 kHz (3:2) resampling
-    (void)pcm; (void)samples;
-    return ESP_ERR_NOT_SUPPORTED;
+    if (!s_play) return ESP_ERR_INVALID_STATE;
+    int16_t out[256];
+    size_t n_out = 0;
+    float pos = s_rs_pos;
+    // Filtered sample i (may reach back into the previous block's history).
+    #define RAW(i) ((i) >= 0 ? pcm[(i)] : s_rs_hist[2 + (i)])
+    #define LP(i)  ((RAW((i) - 1) + 2 * RAW(i) + ((i) + 1 < (long)samples ? RAW((i) + 1) : RAW(i))) / 4)
+    while (pos + 1 < (float)samples) {
+        long i = (long)floorf(pos);             // pos can start slightly negative
+        float frac = pos - (float)i;
+        float a = (float)LP(i), b = (float)LP(i + 1);
+        out[n_out++] = (int16_t)(a + (b - a) * frac);
+        if (n_out == sizeof(out) / sizeof(out[0])) {
+            audio_play_16k(out, n_out);
+            n_out = 0;
+        }
+        pos += 1.5f;
+    }
+    #undef LP
+    #undef RAW
+    if (n_out) audio_play_16k(out, n_out);
+    s_rs_pos = pos - (float)samples;
+    if (samples >= 2) {
+        s_rs_hist[0] = pcm[samples - 2];
+        s_rs_hist[1] = pcm[samples - 1];
+    }
+    return ESP_OK;
 }
 
 void audio_flush_playback(void)
 {
     s_flush = true;
+    s_rs_pos = 0;
 }
 
 bool audio_is_playing(void)

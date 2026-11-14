@@ -4,9 +4,10 @@ An open-source, voice-only AI assistant for ESP32-S3 audio boards. It streams au
 directly to a realtime speech-to-speech API (Gemini Live today) over a TLS WebSocket.
 There's no phone app and no cloud backend of your own.
 
-> **Status:** early scaffolding. Not functional yet.
+> **Status:** early, under active development. Wake word, speaker, status messages, setup and
+> diagnostics pages work; Gemini voice conversations are new and still being tested on hardware.
 
-## Features (planned)
+## Features
 
 - Natural voice conversation with barge-in (server-side VAD)
 - Echo cancellation via Espressif AFE

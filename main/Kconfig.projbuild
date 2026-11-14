@@ -20,9 +20,10 @@ menu "Voice Assistant"
 
     config VA_GEMINI_MODEL
         string "Gemini Live model"
-        default "models/gemini-live-latest"
+        default "gemini-3.8-live"
         help
-            Check the Gemini docs for the current native-audio Live model name.
+            Default Live API model (without the "models/" prefix), as used in
+            Google's Live API examples. Users can change it on the setup page.
 
     config VA_VOICE_NAME
         string "Voice name"
@@ -51,9 +52,17 @@ menu "Voice Assistant"
             Closes the Gemini session (and turns Wi-Fi off on battery)
             to save power and tokens.
 
+    config VA_BARGE_IN
+        bool "Let the user interrupt the assistant while it talks"
+        default n
+        help
+            Keeps the microphones streaming while Gemini speaks. Needs working
+            echo cancellation (correct AFE input layout); otherwise Gemini hears
+            itself and keeps interrupting. Off = the mic pauses while it talks.
+
     config VA_WIFI_OFF_WHEN_IDLE
         bool "Turn Wi-Fi off between conversations"
-        default y
+        default n
         help
             Big battery saving. Adds roughly 1-3 s reconnect latency
             after the wake word; speech is buffered meanwhile.

@@ -71,6 +71,11 @@ cJSON *tools_declarations(void)
              &props, id_req, 1);
     param(props, "id", "INTEGER", "The id from list_saved_conversations.");
 
+    function(decls, "end_conversation",
+             "End the conversation. Call after saying a short goodbye, when the user says "
+             "goodbye or that they're done.",
+             NULL, NULL, 0);
+
     // TODO: appointment tools (add/list/update/delete_appointment, remember_note)
 
     cJSON *tools = cJSON_CreateArray();
