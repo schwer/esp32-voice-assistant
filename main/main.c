@@ -236,7 +236,7 @@ static void check_battery(void)
  */
 static void check_voicepack(void)
 {
-    char st[192];
+    char st[352];
     voicepack_status(st, sizeof(st));
     diag_set_status("voice", st);
     if (voicepack_just_finished()) {

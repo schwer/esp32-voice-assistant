@@ -35,7 +35,7 @@ static const char *TAG = "voicepack";
 
 static volatile bool s_busy, s_abort, s_failed, s_finished;
 static volatile int s_done, s_total;
-static char s_state[128];                 // last outcome (empty while nothing to report)
+static char s_state[320];                 // last outcome (empty while nothing to report)
 static char s_error[128];                 // why the last job stopped, if it failed
 static char s_active[32];                 // voice of the set in use ("" = built-in)
 static char s_job_voice[32];              // voice being recorded
@@ -443,7 +443,7 @@ static void record_task(void *arg)
             }
             s_done++;
             if (redo) {                               // remember progress across interruptions
-                char job[48];
+                char job[64];
                 snprintf(job, sizeof(job), "%s\nredo-%d", voice, (int)todo[i] + 1);
                 write_line(JOB_PATH, job);
             }
@@ -526,7 +526,7 @@ esp_err_t voicepack_request(bool redo)
         for (int i = 0; i < 100 && s_busy; i++) vTaskDelay(pdMS_TO_TICKS(50));
         if (s_busy) return ESP_ERR_TIMEOUT;
     }
-    char job[48];
+    char job[64];
     snprintf(job, sizeof(job), "%s\n%s", settings_get_voice(), redo ? "redo" : "fill");
     write_line(JOB_PATH, job);
     strlcpy(s_job_voice, settings_get_voice(), sizeof(s_job_voice));

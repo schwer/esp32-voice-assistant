@@ -21,7 +21,7 @@ typedef struct {
     char voice[32];         // voice being recorded (or in use when idle)
     char active_voice[32];  // voice messages and conversations use now
     char error[128];        // why the last job stopped, if it failed
-    char status[192];       // one-line summary for people
+    char status[352];       // one-line summary for people
 } voicepack_progress_t;
 
 esp_err_t voicepack_init(void);
