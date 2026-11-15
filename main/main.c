@@ -230,43 +230,28 @@ static void check_battery(void)
 }
 
 /**
- * One voice everywhere: when the device's messages aren't in the selected voice
- * (first setup, or after a voice change) or a re-record was requested, record them
- * with Gemini in the background, only while online and idle. The new set is switched
- * in together with the conversation voice once complete. Failures retry after 10
- * minutes; a wake word pauses recording, which resumes afterwards.
+ * Voice recording jobs are started by saving the setup page (or the diagnostics page).
+ * Here: report status, resume a job paused by a conversation, and say "Ready" in the
+ * new voice when a job finishes.
  */
 static void check_voicepack(void)
 {
-    static TickType_t last_attempt;
-    static bool attempted;
-    char st[96];
+    char st[192];
     voicepack_status(st, sizeof(st));
     diag_set_status("voice", st);
-
     if (voicepack_just_finished()) {
         prompts_say(PROMPT_READY);                     // first words in the new voice
         return;
     }
-    if (voicepack_busy() || !voicepack_needed()) return;
-    if (!net_is_connected() || !settings_has_api_key()) return;
-    if (!wakeword_is_idle() || audio_is_playing()) return;
-    // After a failure (bad key, network, quota), wait 10 minutes before trying again.
-    // Interrupted runs resume right away.
-    if (attempted && voicepack_last_failed() &&
-        xTaskGetTickCount() - last_attempt < pdMS_TO_TICKS(10 * 60 * 1000)) {
-        return;
+    if (voicepack_pending() && !voicepack_busy() && net_is_connected() &&
+        wakeword_is_idle() && !audio_is_playing()) {
+        voicepack_resume();
     }
-    // The main lines go right away; the rarer ones only after 2 quiet minutes.
-    int64_t last = s_last_activity_us > setup_web_last_activity_us() ? s_last_activity_us
-                                                                      : setup_web_last_activity_us();
-    bool idle_long = esp_timer_get_time() - last > 2LL * 60 * 1000000;
-    if (!voicepack_priority_pending() && !idle_long) return;
-    attempted = true;
-    last_attempt = xTaskGetTickCount();
-    ESP_LOGI(TAG, "recording %s messages in %s's voice", idle_long ? "all remaining" : "the main",
-             settings_get_voice());
-    voicepack_start(idle_long);
+}
+
+static bool device_free(void)
+{
+    return wakeword_is_idle();                         // not in a conversation or self-test
 }
 
 /**
@@ -293,7 +278,7 @@ static bool battery_saver(void)
     int64_t last = s_last_activity_us > setup_web_last_activity_us() ? s_last_activity_us
                                                                       : setup_web_last_activity_us();
     if (settings_get_battery_saver() && on_batt && net_is_connected() &&
-        now - last > SAVER_IDLE_US && wakeword_is_idle() && !voicepack_busy() && !audio_is_playing()) {
+        now - last > SAVER_IDLE_US && wakeword_is_idle() && !voicepack_pending() && !audio_is_playing()) {
         ESP_LOGI(TAG, "battery saver: no one has talked to me for 3 minutes, turning Wi-Fi off");
         s_wifi_saving = true;
         net_disconnect();
@@ -396,6 +381,7 @@ void app_main(void)
 
     if (storage_init() == ESP_OK) {
         ESP_ERROR_CHECK(conversations_init());
+        voicepack_set_gate(device_free);       // never record during a conversation
         voicepack_init();                      // use lines recorded in Gemini's voice, if any
         diag_set_status("storage", "ok");
     } else {

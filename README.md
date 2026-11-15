@@ -56,11 +56,12 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 
 ## Lights and spoken status
 
-**One voice.** The device records its own lines (wake-word answers, status messages) by asking
-Gemini Live to read them in the conversation voice: once during setup, again when you pick a
-different voice, or on demand from the diagnostics page (well under a cent each time). A new set
-is switched in only when complete, together with the conversation voice, so you never hear two
-voices. The built-in clips are only a fallback before the first recording.
+**One voice.** When you save the setup page with a new voice (or the first time you save your
+API key), the board immediately records all of its own lines (wake-word answers, status
+messages) by asking Gemini Live to read them in that voice, about a minute, well under a cent.
+The setup page shows a progress bar and tells you when it's finished; then messages and
+conversations switch to the new voice together, and you can play every message on the
+diagnostics page. Until the first recording, the built-in clips are used.
 
 The device also says what's happening ("I need Wi-Fi", "Ready. Say Jarvis when you need me.",
 "Settings saved", ...). Turn this off on the setup page. Phrases live in `tools/prompts.tsv`;

@@ -4,7 +4,7 @@
 //   /data/voice/<Voice>/<id>.ulaw   one recorded line (16 kHz, µ-law)
 //   /data/voice/<Voice>/complete    every line of the phrase list is recorded
 //   /data/voice/active.txt          the complete set in use ("" = built-in clips)
-//   /data/voice/redo.txt            re-record requested for this voice
+//   /data/voice/job.txt             a recording job: "<Voice>" + "redo" (overwrite all)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +25,7 @@
 static const char *TAG = "voicepack";
 
 #define ACTIVE_PATH PROMPTS_RECORDED_DIR "/active.txt"
-#define REDO_PATH   PROMPTS_RECORDED_DIR "/redo.txt"
+#define JOB_PATH    PROMPTS_RECORDED_DIR "/job.txt"
 #define IN_RATE     24000
 #define OUT_RATE    16000
 #define MAX_SECONDS 12
@@ -33,11 +33,12 @@ static const char *TAG = "voicepack";
 #define TURN_TIMEOUT_MS  25000
 #define READY_TIMEOUT_MS 15000
 
-static volatile bool s_busy, s_abort, s_failed, s_last_failed, s_finished;
+static volatile bool s_busy, s_abort, s_failed, s_finished;
 static volatile int s_done, s_total;
-static char s_state[128];
+static char s_state[128];                 // last outcome (empty while nothing to report)
+static char s_error[128];                 // why the last job stopped, if it failed
 static char s_active[32];                 // voice of the set in use ("" = built-in)
-static char s_recording_voice[32];
+static char s_job_voice[32];              // voice being recorded
 static SemaphoreHandle_t s_ready_sem, s_turn_sem;
 static int16_t *s_cap;
 static volatile size_t s_cap_len;
@@ -49,12 +50,14 @@ static void voice_dir(const char *voice, char *buf, size_t len)
     snprintf(buf, len, PROMPTS_RECORDED_DIR "/%s", voice);
 }
 
-static void read_line(const char *path, char *buf, size_t len)
+static void read_lines(const char *path, char *l1, size_t n1, char *l2, size_t n2)
 {
-    buf[0] = 0;
+    l1[0] = 0;
+    if (l2) l2[0] = 0;
     FILE *f = fopen(path, "r");
     if (!f) return;
-    if (fgets(buf, len, f)) buf[strcspn(buf, "\r\n")] = 0;
+    if (fgets(l1, n1, f)) l1[strcspn(l1, "\r\n")] = 0;
+    if (l2 && fgets(l2, n2, f)) l2[strcspn(l2, "\r\n")] = 0;
     fclose(f);
 }
 
@@ -80,47 +83,12 @@ static bool set_complete(const char *voice)
     return exists(path);
 }
 
-// Heard most often: recorded first (about 15 s), then the voice switches over.
-// The other lines are recorded later, while the device is idle.
-static const prompt_t PRIORITY[] = {
-    PROMPT_WAKE_ACK_1, PROMPT_WAKE_ACK_2, PROMPT_WAKE_ACK_3, PROMPT_READY, PROMPT_SETTINGS_SAVED,
-};
-#define N_PRIORITY ((int)(sizeof(PRIORITY) / sizeof(PRIORITY[0])))
-
-static bool is_priority(prompt_t p)
-{
-    for (int i = 0; i < N_PRIORITY; i++) if (PRIORITY[i] == p) return true;
-    return false;
-}
-
-/** Recording order: priority lines, then the rest. */
-static int recording_order(prompt_t *order)
-{
-    int n = 0;
-    for (int i = 0; i < N_PRIORITY; i++) order[n++] = PRIORITY[i];
-    for (int p = 0; p < PROMPT_COUNT; p++) if (!is_priority((prompt_t)p)) order[n++] = (prompt_t)p;
-    return n;
-}
-
 static bool line_recorded(const char *voice, prompt_t p)
 {
     char dir[64], path[96];
     voice_dir(voice, dir, sizeof(dir));
     prompts_recorded_path(dir, p, path, sizeof(path));
     return exists(path);
-}
-
-static bool has_priority_lines(const char *voice)
-{
-    for (int i = 0; i < N_PRIORITY; i++) if (!line_recorded(voice, PRIORITY[i])) return false;
-    return true;
-}
-
-static int redo_progress(void)
-{
-    char v[16];
-    read_line(REDO_PATH, v, sizeof(v));
-    return v[0] ? atoi(v) : -1;                      // -1 = no re-record requested
 }
 
 static void remove_dir(const char *dir)
@@ -177,27 +145,19 @@ const char *voicepack_active_voice(void)
 
 const char *voicepack_conversation_voice(void)
 {
-    // The built-in clips may not be a Gemini voice (they're made with an offline
-    // TTS engine). Until a set is recorded, conversations use the selected voice.
+    // The built-in clips aren't a Gemini voice (they're made with an offline TTS
+    // engine). Until a set is recorded, conversations use the selected voice.
     return s_active[0] ? s_active : settings_get_voice();
 }
 
-bool voicepack_needed(void)
+bool voicepack_matches_selected(void)
 {
-    if (exists(REDO_PATH)) return true;
-    if (strcmp(s_active, settings_get_voice()) != 0) return true;
-    return !set_complete(s_active);                  // the less common lines are still missing
+    return s_active[0] && strcmp(s_active, settings_get_voice()) == 0;
 }
 
-bool voicepack_priority_pending(void)
-{
-    int redo = redo_progress();
-    if (redo >= 0 && redo < N_PRIORITY) return true;
-    return strcmp(s_active, settings_get_voice()) != 0;
-}
-
+bool voicepack_pending(void) { return exists(JOB_PATH); }
+const char *voicepack_progress_voice(void) { return s_job_voice; }
 bool voicepack_busy(void) { return s_busy; }
-bool voicepack_last_failed(void) { return s_last_failed; }
 
 bool voicepack_just_finished(void)
 {
@@ -206,25 +166,33 @@ bool voicepack_just_finished(void)
     return f;
 }
 
+void voicepack_progress(voicepack_progress_t *p)
+{
+    memset(p, 0, sizeof(*p));
+    p->busy = s_busy;
+    p->pending = voicepack_pending();
+    p->done = s_done;
+    p->total = s_total;
+    strlcpy(p->voice, s_busy || p->pending ? s_job_voice : voicepack_active_voice(), sizeof(p->voice));
+    strlcpy(p->active_voice, voicepack_active_voice(), sizeof(p->active_voice));
+    strlcpy(p->error, s_error, sizeof(p->error));
+    voicepack_status(p->status, sizeof(p->status));
+}
+
 void voicepack_status(char *buf, size_t len)
 {
     if (s_busy) {
-        if (strcmp(s_active, s_recording_voice) != 0) {
-            snprintf(buf, len, "recording the main messages in %s's voice (%d of %d); until then everything stays in %s's voice",
-                     s_recording_voice, s_done + 1, s_total, voicepack_active_voice());
-        } else {
-            snprintf(buf, len, "%s's voice is in use; recording messages (%d of %d) while idle",
-                     s_recording_voice, s_done + 1, s_total);
-        }
+        snprintf(buf, len, "recording messages in %s's voice: %d of %d", s_job_voice, s_done, s_total);
+    } else if (voicepack_pending()) {
+        snprintf(buf, len, "recording in %s's voice paused%s%s; it continues when the board is free",
+                 s_job_voice, s_error[0] ? ": " : "", s_error);
     } else if (s_state[0]) {
         strlcpy(buf, s_state, len);
-    } else if (voicepack_priority_pending()) {
-        snprintf(buf, len, "will record the main messages in %s's voice as soon as it's online", settings_get_voice());
-    } else if (voicepack_needed()) {
-        snprintf(buf, len, "%s's voice is in use; the less common messages are recorded when the board is idle",
-                 voicepack_active_voice());
+    } else if (!s_active[0]) {
+        snprintf(buf, len, "built-in voice: save the setup page to record messages in %s's voice",
+                 settings_get_voice());
     } else {
-        snprintf(buf, len, "messages and conversations use %s's voice", voicepack_active_voice());
+        snprintf(buf, len, "messages and conversations use %s's voice", s_active);
     }
 }
 
@@ -234,9 +202,11 @@ esp_err_t voicepack_init(void)
     s_ready_sem = xSemaphoreCreateBinary();
     s_turn_sem = xSemaphoreCreateBinary();
     char v[32];
-    read_line(ACTIVE_PATH, v, sizeof(v));
-    activate(v[0] && (set_complete(v) || has_priority_lines(v)) ? v : "");
-    ESP_LOGI(TAG, "messages in %s's voice", voicepack_active_voice());
+    read_lines(ACTIVE_PATH, v, sizeof(v), NULL, 0);
+    activate(v[0] && set_complete(v) ? v : "");
+    read_lines(JOB_PATH, s_job_voice, sizeof(s_job_voice), NULL, 0);
+    ESP_LOGI(TAG, "messages in %s's voice%s", voicepack_active_voice(),
+             voicepack_pending() ? " (a recording job is waiting)" : "");
     return ESP_OK;
 }
 
@@ -246,27 +216,6 @@ void voicepack_abort(void)
     s_abort = true;
     xSemaphoreGive(s_ready_sem);                      // wake any wait right away
     xSemaphoreGive(s_turn_sem);
-}
-
-void voicepack_voice_changed(void)
-{
-    s_state[0] = 0;
-    s_last_failed = false;
-    if (s_busy && strcmp(s_recording_voice, settings_get_voice()) != 0) voicepack_abort();
-}
-
-esp_err_t voicepack_rerecord(void)
-{
-    if (s_busy) {
-        voicepack_abort();
-        for (int i = 0; i < 100 && s_busy; i++) vTaskDelay(pdMS_TO_TICKS(50));
-        if (s_busy) return ESP_ERR_TIMEOUT;
-    }
-    write_line(REDO_PATH, "0");                      // overwrite every line, priority lines first
-    s_state[0] = 0;
-    s_last_failed = false;
-    ESP_LOGI(TAG, "re-record requested in %s's voice", settings_get_voice());
-    return ESP_OK;
 }
 
 // ---------------------------------------------------------------- Gemini callbacks
@@ -425,37 +374,42 @@ static bool record_line(const char *dir, prompt_t p, int16_t *out16)
     return false;
 }
 
-static volatile bool s_include_rest;
+
+// ---------------------------------------------------------------- job
 
 static void record_task(void *arg)
 {
     int16_t *out16 = heap_caps_malloc(OUT_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     s_cap = heap_caps_malloc(IN_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
-    char key[SETTINGS_API_KEY_MAX], dir[64];
-    const char *voice = s_recording_voice;
-    int redo = redo_progress();                       // re-record: overwrite every line in order
+    char key[SETTINGS_API_KEY_MAX], dir[64], mode[16];
+    read_lines(JOB_PATH, s_job_voice, sizeof(s_job_voice), mode, sizeof(mode));
+    const char *voice = s_job_voice;
+    bool redo = strcmp(mode, "redo") == 0;
     int missing = 0;
     s_failed = false;
-    s_state[0] = 0;
+    s_error[0] = 0;
 
     voice_dir(voice, dir, sizeof(dir));
     remove_other_sets(voice, s_active);              // keep only the set in use + the new one
     mkdir(dir, 0755);
 
-    prompt_t order[PROMPT_COUNT];
-    int n_order = recording_order(order);
-    int limit = s_include_rest ? n_order : N_PRIORITY;
-    prompt_t todo[PROMPT_COUNT];
-    int n_todo = 0, first = redo >= 0 ? redo : 0;
-    for (int i = first; i < limit; i++) {
-        if (redo >= 0 || !line_recorded(voice, order[i])) todo[n_todo++] = order[i];
+    // Re-record: overwrite every line, tracked by "redo-<n>" progress so it can resume.
+    int redo_from = 0;
+    if (strncmp(mode, "redo-", 5) == 0) {
+        redo = true;
+        redo_from = atoi(mode + 5);
     }
-    s_total = n_todo;
-    s_done = 0;
+    prompt_t todo[PROMPT_COUNT];
+    int n_todo = 0;
+    for (int p = redo ? redo_from : 0; p < PROMPT_COUNT; p++) {
+        if (redo || !line_recorded(voice, (prompt_t)p)) todo[n_todo++] = (prompt_t)p;
+    }
+    s_total = PROMPT_COUNT;
+    s_done = PROMPT_COUNT - n_todo;
 
     if (n_todo > 0) {
         if (!out16 || !s_cap || settings_get_api_key(key, sizeof(key)) != ESP_OK) {
-            snprintf(s_state, sizeof(s_state), "couldn't record: %s", out16 && s_cap ? "no API key" : "out of memory");
+            strlcpy(s_error, out16 && s_cap ? "no API key saved" : "out of memory", sizeof(s_error));
             goto done;
         }
         char instruction[400];
@@ -477,69 +431,68 @@ static void record_task(void *arg)
         esp_err_t err = gemini_live_start(&cfg);
         memset(key, 0, sizeof(key));
         if (err != ESP_OK || xSemaphoreTake(s_ready_sem, pdMS_TO_TICKS(READY_TIMEOUT_MS)) != pdTRUE || s_failed) {
-            snprintf(s_state, sizeof(s_state), "couldn't record in %s's voice (%s); will retry in 10 minutes",
-                     voice, gemini_live_last_error()[0] ? gemini_live_last_error() : "no answer");
+            snprintf(s_error, sizeof(s_error), "couldn't reach Gemini (%s)",
+                     gemini_live_last_error()[0] ? gemini_live_last_error() : "no answer");
             gemini_live_stop();
             goto done;
         }
         for (int i = 0; i < n_todo && !s_abort && !s_failed; i++) {
-            if (record_line(dir, todo[i], out16)) {
-                if (redo >= 0) {                      // remember progress across interruptions
-                    char v[16];
-                    snprintf(v, sizeof(v), "%d", first + i + 1);
-                    write_line(REDO_PATH, v);
-                }
-            } else {
+            if (!record_line(dir, todo[i], out16)) {
                 missing++;
-                if (redo >= 0) break;                 // keep the order: retry from here later
+                continue;
             }
             s_done++;
-            // As soon as the main lines exist, switch messages + conversations to this voice.
-            if (strcmp(s_active, voice) != 0 && has_priority_lines(voice)) {
-                char old[32];
-                strlcpy(old, s_active, sizeof(old));
-                activate(voice);
-                if (old[0]) {
-                    char old_dir[64];
-                    voice_dir(old, old_dir, sizeof(old_dir));
-                    remove_dir(old_dir);
-                }
-                s_finished = true;                    // main says "Ready" in the new voice
-                ESP_LOGI(TAG, "main messages recorded: switched to %s's voice", voice);
+            if (redo) {                               // remember progress across interruptions
+                char job[48];
+                snprintf(job, sizeof(job), "%s\nredo-%d", voice, (int)todo[i] + 1);
+                write_line(JOB_PATH, job);
             }
-            vTaskDelay(pdMS_TO_TICKS(300));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
         gemini_live_stop();
-    }
-
-    // Everything recorded?
-    bool all = true;
-    for (int p = 0; p < PROMPT_COUNT; p++) if (!line_recorded(voice, (prompt_t)p)) all = false;
-    if (redo >= 0 && redo_progress() < n_order) all = false;
-    if (all) {
-        char done_path[96];
-        snprintf(done_path, sizeof(done_path), "%s/complete", dir);
-        write_line(done_path, voice);
-        remove(REDO_PATH);
+        if (s_failed && !s_abort) {
+            snprintf(s_error, sizeof(s_error), "the connection to Gemini dropped (%s)", gemini_live_last_error());
+        }
     }
 
     if (s_abort) {
-        snprintf(s_state, sizeof(s_state), "paused (you were talking to me); recording in %s's voice resumes when idle", voice);
-    } else if (s_failed) {
-        snprintf(s_state, sizeof(s_state), "recording in %s's voice was cut off (%s); will retry in 10 minutes",
-                 voice, gemini_live_last_error());
-    } else if (missing > 0) {
-        snprintf(s_state, sizeof(s_state), "%d line(s) didn't record cleanly in %s's voice; will retry in 10 minutes",
-                 missing, voice);
-    } else if (all) {
-        snprintf(s_state, sizeof(s_state), "all messages and conversations use %s's voice", voice);
-    } else {
-        s_state[0] = 0;                               // main lines done; the rest when idle
+        strlcpy(s_error, "you were talking to me", sizeof(s_error));
+    } else if (missing > 0 && !s_error[0]) {
+        snprintf(s_error, sizeof(s_error), "%d line(s) didn't record cleanly", missing);
+    }
+
+    bool all = !s_abort && !s_failed && missing == 0;
+    for (int p = 0; all && p < PROMPT_COUNT; p++) if (!line_recorded(voice, (prompt_t)p)) all = false;
+    if (all) {
+        // Every line is recorded: switch messages and conversations over together.
+        char done_path[96];
+        snprintf(done_path, sizeof(done_path), "%s/complete", dir);
+        write_line(done_path, voice);
+        char old[32];
+        strlcpy(old, s_active, sizeof(old));
+        activate(voice);
+        if (old[0] && strcmp(old, voice) != 0) {
+            char old_dir[64];
+            voice_dir(old, old_dir, sizeof(old_dir));
+            remove_dir(old_dir);
+        }
+        remove(JOB_PATH);
+        s_done = s_total;
+        snprintf(s_state, sizeof(s_state), "finished: messages and conversations now use %s's voice", voice);
+        s_finished = true;
+    } else if (!s_abort && s_error[0]) {
+        // Failed (not interrupted): drop the job; the user can save again to retry.
+        remove(JOB_PATH);
+        snprintf(s_state, sizeof(s_state), "couldn't finish recording in %s's voice: %s. Save the setup page to try again.",
+                 voice, s_error);
     }
 done:
-    s_last_failed = missing > 0 || (s_failed && !s_abort) ||
-                    (n_todo > 0 && strstr(s_state, "couldn't") != NULL);
-    ESP_LOGI(TAG, "%s", s_state[0] ? s_state : "main messages recorded; the rest when idle");
+    if (!s_finished && !s_abort && s_error[0] && exists(JOB_PATH)) {
+        remove(JOB_PATH);
+        snprintf(s_state, sizeof(s_state), "couldn't record in %s's voice: %s. Save the setup page to try again.",
+                 voice, s_error);
+    }
+    ESP_LOGI(TAG, "%s", s_state[0] ? s_state : s_error);
     free(out16);
     free(s_cap);
     s_cap = NULL;
@@ -548,16 +501,44 @@ done:
     vTaskDelete(NULL);
 }
 
-esp_err_t voicepack_start(bool include_rest)
+static bool (*s_gate)(void);
+void voicepack_set_gate(bool (*can_start)(void)) { s_gate = can_start; }
+
+static esp_err_t start_job(void)
 {
     if (s_busy) return ESP_ERR_INVALID_STATE;
-    s_include_rest = include_rest;
-    strlcpy(s_recording_voice, settings_get_voice(), sizeof(s_recording_voice));
+    if (s_gate && !s_gate()) return ESP_OK;          // pending; resumed when the device is free
     s_busy = true;
     s_abort = false;
+    s_state[0] = 0;
     if (xTaskCreate(record_task, "voicepack", 6144, NULL, 3, NULL) != pdPASS) {
         s_busy = false;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+esp_err_t voicepack_request(bool redo)
+{
+    // A job for another voice is replaced; stop it first.
+    if (s_busy) {
+        voicepack_abort();
+        for (int i = 0; i < 100 && s_busy; i++) vTaskDelay(pdMS_TO_TICKS(50));
+        if (s_busy) return ESP_ERR_TIMEOUT;
+    }
+    char job[48];
+    snprintf(job, sizeof(job), "%s\n%s", settings_get_voice(), redo ? "redo" : "fill");
+    write_line(JOB_PATH, job);
+    strlcpy(s_job_voice, settings_get_voice(), sizeof(s_job_voice));
+    s_state[0] = 0;
+    s_error[0] = 0;
+    s_done = 0;
+    s_total = PROMPT_COUNT;
+    ESP_LOGI(TAG, "recording requested in %s's voice%s", s_job_voice, redo ? " (all lines again)" : "");
+    return start_job();
+}
+
+esp_err_t voicepack_resume(void)
+{
+    return voicepack_pending() ? start_job() : ESP_ERR_NOT_FOUND;
 }

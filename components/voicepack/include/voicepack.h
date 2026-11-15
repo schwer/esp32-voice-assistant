@@ -1,18 +1,28 @@
 // SPDX-License-Identifier: MIT
 //
 // One voice, everywhere: the device's own lines (wake-word answers, status messages,
-// tests) are recorded at runtime by asking Gemini Live to read tools/prompts.tsv in
-// the voice used for conversations, and overwrite the built-in clips.
+// tests) are recorded by asking Gemini Live to read tools/prompts.tsv in the voice
+// used for conversations, and overwrite the built-in clips.
 //
-// The most-heard lines (wake-word answers, "Ready", "Settings saved") are recorded
-// first, in about 15 seconds; then messages and conversations switch to the new voice
-// together. The remaining, rarer lines are recorded while the device is idle.
-// Recording happens when the messages aren't in the selected voice (first setup, or
-// after changing the voice) or when asked from the diagnostics page.
+// Recording is a job started when the user saves the setup page with a new voice (or
+// while the messages aren't in the selected voice yet), or from the diagnostics page.
+// It runs until finished, reporting progress; messages and conversations switch to the
+// new voice together when every line is recorded. If the user starts a conversation
+// meanwhile, the job pauses and resumes afterwards.
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
+
+typedef struct {
+    bool busy;              // recording right now
+    bool pending;           // a job exists (running or paused)
+    int done, total;        // lines recorded so far / lines in the job
+    char voice[32];         // voice being recorded (or in use when idle)
+    char active_voice[32];  // voice messages and conversations use now
+    char error[128];        // why the last job stopped, if it failed
+    char status[192];       // one-line summary for people
+} voicepack_progress_t;
 
 esp_err_t voicepack_init(void);
 
@@ -20,27 +30,23 @@ esp_err_t voicepack_init(void);
 const char *voicepack_active_voice(void);
 /** Gemini voice to use for conversations, so they match the messages. */
 const char *voicepack_conversation_voice(void);
+/** True if a complete recorded set in the selected voice is in use. */
+bool voicepack_matches_selected(void);
 
-/** True while any line still needs recording (or a re-record was requested). */
-bool voicepack_needed(void);
-/** True while the most-heard lines ("Yes?", "Ready...") aren't in the selected voice yet. */
-bool voicepack_priority_pending(void);
-/**
- * Record in the background (call when online, not in a conversation, with an API key).
- * The most-heard lines go first and switch the voice over as soon as they exist;
- * include_rest also records the remaining lines (do that when the device is idle).
- */
-esp_err_t voicepack_start(bool include_rest);
+/** Recording only starts when this says the device is free (not in a conversation). */
+void voicepack_set_gate(bool (*can_start)(void));
+/** Start recording in the selected voice now, or as soon as the device is free. */
+esp_err_t voicepack_request(bool redo);
+/** Continue a paused job (call when idle and online). */
+esp_err_t voicepack_resume(void);
+bool voicepack_pending(void);
+/** Voice of the current or paused job. */
+const char *voicepack_progress_voice(void);
 bool voicepack_busy(void);
-/** Stop now (e.g. the user said "Jarvis"); unfinished lines are recorded later. */
+/** Pause now (e.g. the user said "Jarvis"); voicepack_resume() continues. */
 void voicepack_abort(void);
-/** The selected voice changed: stop a recording in the old one. */
-void voicepack_voice_changed(void);
-/** Record every line again in the selected voice (diagnostics button). */
-esp_err_t voicepack_rerecord(void);
 
-bool voicepack_last_failed(void);
-/** Set once when a complete set was just switched in (cleared on read). */
-bool voicepack_just_finished(void);
-/** Human-readable state for the setup and diagnostics pages. */
+void voicepack_progress(voicepack_progress_t *out);
 void voicepack_status(char *buf, size_t len);
+/** Set once when a job just finished (cleared on read). */
+bool voicepack_just_finished(void);

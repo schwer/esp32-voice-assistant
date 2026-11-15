@@ -154,6 +154,54 @@ static esp_err_t forbid(httpd_req_t *req)
     return ESP_FAIL;
 }
 
+// ---------- voice recording progress (setup + diagnostics pages) ----------
+
+// Card with a progress bar; polls /voice/progress while a recording job runs.
+static const char VOICE_PROGRESS_HTML[] =
+"<div class=card id=vp hidden><strong id=vptitle>Recording voice messages</strong>"
+"<div style='height:10px;background:var(--border);border-radius:99px;overflow:hidden;margin:12px 0 8px'>"
+"<div id=vpbar style='height:100%;width:0;background:var(--accent);transition:width .4s'></div></div>"
+"<p id=vptext class=note style='margin:0'></p></div>"
+"<script>(function(){const $=i=>document.getElementById(i);let seen=false;"
+"async function poll(){let p;try{p=await (await fetch('/voice/progress',{cache:'no-store'})).json()}"
+"catch(e){return setTimeout(poll,2000)}"
+"const active=p.busy||p.pending;"
+"if(active)seen=true;"
+"if(!active&&!seen&&!location.search.includes('rec=1'))return;"
+"$('vp').hidden=false;"
+"const pct=p.total?Math.round(100*p.done/p.total):0;$('vpbar').style.width=(active?pct:(p.error?pct:100))+'%';"
+"if(active){$('vptitle').textContent='Recording voice messages in '+p.voice+'\\u2019s voice\\u2026';"
+"$('vptext').textContent=p.done+' of '+p.total+' messages recorded. '+(p.busy?'Keep the board online; this takes about a minute.':p.status);"
+"setTimeout(poll,1000)}"
+"else if(p.error){$('vptitle').textContent='Voice recording stopped';$('vptext').className='note bad';$('vptext').textContent=p.status}"
+"else if(seen||location.search.includes('rec=1')){if(!seen){seen=true;return setTimeout(poll,1000)}"
+"$('vptitle').textContent='\\u2714 Finished: everything now uses '+p.active_voice+'\\u2019s voice';"
+"$('vptext').innerHTML='';const a=document.createElement('a');a.href='/diag#voice-messages';"
+"a.textContent='Hear the new messages on the diagnostics page \\u2192';$('vptext').append(a)}}"
+"poll()})()</script>";
+
+static esp_err_t get_voice_progress(httpd_req_t *req)
+{
+    voicepack_progress_t p;
+    voicepack_progress(&p);
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "busy", p.busy);
+    cJSON_AddBoolToObject(r, "pending", p.pending);
+    cJSON_AddNumberToObject(r, "done", p.done);
+    cJSON_AddNumberToObject(r, "total", p.total);
+    cJSON_AddStringToObject(r, "voice", p.voice);
+    cJSON_AddStringToObject(r, "active_voice", p.active_voice);
+    cJSON_AddStringToObject(r, "error", p.error);
+    cJSON_AddStringToObject(r, "status", p.status);
+    char *json = cJSON_PrintUnformatted(r);
+    cJSON_Delete(r);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_sendstr(req, json ? json : "{}");
+    free(json);
+    return err;
+}
+
 // ---------- page ----------
 
 static const char PAGE_HEAD[] =
@@ -209,6 +257,7 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "<h1>Voice Assistant Setup</h1><p class=muted>Settings are stored only on this device.</p>");
 
     if (saved) SEND(req, "<p class=ok>Saved.</p>");
+    SEND(req, VOICE_PROGRESS_HTML);
     if (failed) SEND(req, "<p class=warn>Couldn't save. Check the values and try again.</p>");
     if (!settings_has_api_key()) {
         SEND(req, "<p class=warn>Add your Gemini API key to start using the assistant. "
@@ -280,14 +329,9 @@ static esp_err_t get_root(httpd_req_t *req)
         send_escaped(req, cur_voice);
         SEND(req, "</option>");
     }
-    SEND(req, "</select><p class=note>The board uses one voice for everything. After you pick a new one, it records its own messages (\"Yes?\", \"Settings saved\", ...) in it, then switches conversations and messages over together.</p>");
-    {
-        char vs[160];
-        voicepack_status(vs, sizeof(vs));
-        SEND(req, "<p class=note><strong>Now:</strong> ");
-        send_escaped(req, vs);
-        SEND(req, "</p>");
-    }
+    SEND(req, "</select><p class=note>The board uses one voice for everything. When you save a new voice, "
+              "the board records all of its own messages (\"Yes?\", \"Settings saved\", ...) in it right away; "
+              "you'll see the progress at the top of this page.</p>");
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
@@ -366,9 +410,7 @@ static esp_err_t post_save(httpd_req_t *req)
         err |= settings_set_name(val);
     }
     if (form_field(body, "voice", val, sizeof(val)) && val[0] && strcmp(val, settings_get_voice()) != 0) {
-        esp_err_t verr = settings_set_voice(val);
-        err |= verr;
-        if (verr == ESP_OK) voicepack_voice_changed();   // re-record the board's lines in it
+        err |= settings_set_voice(val);
     }
     if (form_field(body, "model", val, sizeof(val)) && val[0]) {
         const char *m = strncmp(val, "models/", 7) == 0 ? val + 7 : val;   // accept either form
@@ -390,6 +432,15 @@ static esp_err_t post_save(httpd_req_t *req)
     }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));
+    // One voice: if the board's messages aren't in the selected voice (a new voice, or the
+    // first save with an API key), record them now. The page shows the progress.
+    bool recording = false;
+    if (err == ESP_OK && settings_has_api_key() && !voicepack_matches_selected() &&
+        !(voicepack_pending() && strcmp(voicepack_progress_voice(), settings_get_voice()) == 0)) {
+        recording = voicepack_request(false) == ESP_OK;
+    } else if (voicepack_pending()) {
+        recording = true;                              // already recording this voice
+    }
     if (err == ESP_OK) {
         leds_event(LEDS_EVENT_SAVED);
         prompts_say(PROMPT_SETTINGS_SAVED);
@@ -399,7 +450,7 @@ static esp_err_t post_save(httpd_req_t *req)
     }
 
     httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", err == ESP_OK ? "/?saved=1" : "/?error=1");
+    httpd_resp_set_hdr(req, "Location", err != ESP_OK ? "/?error=1" : recording ? "/?saved=1&rec=1" : "/?saved=1");
     return httpd_resp_send(req, NULL, 0);
 }
 
@@ -614,13 +665,12 @@ static esp_err_t post_play(httpd_req_t *req)
 static esp_err_t post_voice_rerecord(httpd_req_t *req)
 {
     if (!diag_action_allowed(req)) return forbid(req);
-    esp_err_t err = voicepack_rerecord();
+    esp_err_t err = settings_has_api_key() ? voicepack_request(true) : ESP_ERR_INVALID_STATE;
     cJSON *r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", err == ESP_OK);
     char msg[160];
-    snprintf(msg, sizeof(msg), "Recording every message again in %s's voice with Gemini. "
-             "It starts within a few seconds while the board is idle; the list below updates when it's done.",
-             settings_get_voice());
+    snprintf(msg, sizeof(msg), err == ESP_ERR_INVALID_STATE ? "Add your Gemini API key on the setup page first."
+             : "Recording every message again in %s's voice.", settings_get_voice());
     cJSON_AddStringToObject(r, "message", err == ESP_OK ? msg : "Couldn't start right now. Try again in a moment.");
     return send_json(req, r);
 }
@@ -681,6 +731,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
         { .uri = "/diag/voice-record",.method = HTTP_POST, .handler = post_voice_rerecord },
+        { .uri = "/voice/progress",   .method = HTTP_GET,  .handler = get_voice_progress },
         { .uri = "/diag/mic-test",    .method = HTTP_GET,  .handler = get_mic_test },
     };
     httpd_register_uri_handler(s_server, &root);
