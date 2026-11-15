@@ -8,6 +8,7 @@
 #include "audio.h"
 #include "settings.h"
 #include "prompts.h"
+#include "dsp.h"
 #include "esp_random.h"
 
 static const char *TAG = "prompts";
@@ -148,29 +149,6 @@ void prompts_recorded_path(const char *dir, prompt_t p, char *buf, size_t len)
     snprintf(buf, len, "%s/%s.ulaw", dir, prompts_id(p));
 }
 
-// G.711 µ-law: recorded lines are stored at 8 bits per sample to fit two voices.
-uint8_t prompts_ulaw_encode(int16_t pcm)
-{
-    const int BIAS = 0x84, CLIP = 32635;
-    int sign = (pcm >> 8) & 0x80, v = pcm;
-    if (sign) v = -v;
-    if (v > CLIP) v = CLIP;
-    v += BIAS;
-    int exp = 7;
-    for (int mask = 0x4000; (v & mask) == 0 && exp > 0; mask >>= 1) exp--;
-    int mant = (v >> (exp + 3)) & 0x0F;
-    return (uint8_t)~(sign | (exp << 4) | mant);
-}
-
-int16_t prompts_ulaw_decode(uint8_t u)
-{
-    u = ~u;
-    int sign = u & 0x80, exp = (u >> 4) & 0x07, mant = u & 0x0F;
-    int v = ((mant << 3) + 0x84) << exp;
-    v -= 0x84;
-    return (int16_t)(sign ? -v : v);
-}
-
 bool prompts_is_recorded(prompt_t p)
 {
     if (!s_recorded_dir[0] || p >= PROMPT_COUNT) return false;
@@ -193,7 +171,7 @@ static bool play_recorded(prompt_t p)
     static int16_t pcm[1024];
     size_t n, total = 0;
     while ((n = fread(enc, 1, sizeof(enc), f)) > 0) {
-        for (size_t i = 0; i < n; i++) pcm[i] = prompts_ulaw_decode(enc[i]);
+        for (size_t i = 0; i < n; i++) pcm[i] = dsp_ulaw_decode(enc[i]);   // stored at 8 bits/sample to fit two voices
         audio_play_16k(pcm, n);
         total += n;
     }

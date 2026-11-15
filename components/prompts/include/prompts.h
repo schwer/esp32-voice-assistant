@@ -53,8 +53,6 @@ const char *prompts_builtin_voice(void);
 /** Play recordings from this directory (a complete set), or NULL for the built-in clips. */
 void prompts_set_recorded_dir(const char *dir);
 void prompts_recorded_path(const char *dir, prompt_t p, char *buf, size_t len);
-uint8_t prompts_ulaw_encode(int16_t pcm);
-int16_t prompts_ulaw_decode(uint8_t u);
 
 /** True if the line will play from a recording in Gemini's voice (else built-in). */
 bool prompts_is_recorded(prompt_t p);

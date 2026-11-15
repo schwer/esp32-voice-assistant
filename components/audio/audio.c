@@ -15,6 +15,7 @@
 #include "es8311_codec.h"
 #include "esp_io_expander_tca95xx_16bit.h"
 #include "board.h"
+#include "dsp.h"
 #include "audio.h"
 
 static const char *TAG = "audio";
@@ -311,38 +312,19 @@ esp_err_t audio_play_16k(const int16_t *pcm, size_t samples)
     return ESP_OK;
 }
 
-// 24 kHz -> 16 kHz: step 1.5 input samples per output sample, with a light
-// 3-tap low-pass first so the 8-12 kHz band doesn't alias into speech.
-static float s_rs_pos;                 // position into the next block (in input samples)
-static int16_t s_rs_hist[2];           // last two input samples of the previous block
+// Gemini's 24 kHz audio -> the board's 16 kHz (see components/dsp, unit-tested).
+static dsp_resampler_t s_rs;
+static int16_t s_rs_out[DSP_RESAMPLE_MAX_OUT(6000)];
 
 esp_err_t audio_play(const int16_t *pcm, size_t samples)
 {
     if (!s_play) return ESP_ERR_INVALID_STATE;
-    int16_t out[256];
-    size_t n_out = 0;
-    float pos = s_rs_pos;
-    // Filtered sample i (may reach back into the previous block's history).
-    #define RAW(i) ((i) >= 0 ? pcm[(i)] : s_rs_hist[2 + (i)])
-    #define LP(i)  ((RAW((i) - 1) + 2 * RAW(i) + ((i) + 1 < (long)samples ? RAW((i) + 1) : RAW(i))) / 4)
-    while (pos + 1 < (float)samples) {
-        long i = (long)floorf(pos);             // pos can start slightly negative
-        float frac = pos - (float)i;
-        float a = (float)LP(i), b = (float)LP(i + 1);
-        out[n_out++] = (int16_t)(a + (b - a) * frac);
-        if (n_out == sizeof(out) / sizeof(out[0])) {
-            audio_play_16k(out, n_out);
-            n_out = 0;
-        }
-        pos += 1.5f;
-    }
-    #undef LP
-    #undef RAW
-    if (n_out) audio_play_16k(out, n_out);
-    s_rs_pos = pos - (float)samples;
-    if (samples >= 2) {
-        s_rs_hist[0] = pcm[samples - 2];
-        s_rs_hist[1] = pcm[samples - 1];
+    while (samples) {
+        size_t n = samples < 6000 ? samples : 6000;   // bounded output buffer
+        size_t out = dsp_resample_24_16(&s_rs, pcm, n, s_rs_out);
+        if (out) audio_play_16k(s_rs_out, out);
+        pcm += n;
+        samples -= n;
     }
     return ESP_OK;
 }
@@ -350,7 +332,7 @@ esp_err_t audio_play(const int16_t *pcm, size_t samples)
 void audio_flush_playback(void)
 {
     s_flush = true;
-    s_rs_pos = 0;
+    dsp_resampler_reset(&s_rs);
 }
 
 bool audio_is_playing(void)

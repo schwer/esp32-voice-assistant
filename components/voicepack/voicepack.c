@@ -21,6 +21,7 @@
 #include "prompts.h"
 #include "settings.h"
 #include "voicepack.h"
+#include "dsp.h"
 
 static const char *TAG = "voicepack";
 
@@ -241,97 +242,7 @@ static void on_audio_out(const int16_t *pcm, size_t n, void *ctx)
 static void on_turn_complete(void *ctx) { xSemaphoreGive(s_turn_sem); }
 
 // ---------------------------------------------------------------- audio processing
-
-/** 24 kHz -> 16 kHz with a light low-pass; returns output samples. */
-static size_t resample(const int16_t *in, size_t n, int16_t *out)
-{
-    size_t o = 0;
-    for (float pos = 0; pos + 1 < (float)n; pos += 1.5f) {
-        long i = (long)pos;
-        float frac = pos - (float)i;
-        #define LP(k) ((in[(k) > 0 ? (k) - 1 : 0] + 2 * in[k] + in[(k) + 1 < (long)n ? (k) + 1 : (k)]) / 4)
-        float a = (float)LP(i), b = (float)LP(i + 1);
-        #undef LP
-        out[o++] = (int16_t)(a + (b - a) * frac);
-    }
-    return o;
-}
-
-/** One biquad section (direct form I). */
-typedef struct { float b0, b1, b2, a1, a2, x1, x2, y1, y2; } biquad_t;
-
-static float biquad(biquad_t *f, float x)
-{
-    float y = f->b0 * x + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
-    f->x2 = f->x1; f->x1 = x;
-    f->y2 = f->y1; f->y1 = y;
-    return y;
-}
-
-/**
- * Same treatment as the built-in clips (tools/gen_prompts.py: speakerize):
- * remove bass the small speaker can't play, +3 dB presence at 3 kHz, set the
- * speech loudness to -13 dBFS, and soft-limit peaks.
- */
-static void speakerize(int16_t *pcm, size_t n)
-{
-    const float fs = OUT_RATE, pi = 3.14159265f;
-    // 2nd-order Butterworth high-pass at 150 Hz (RBJ, Q = 0.7071)
-    float w0 = 2 * pi * 150 / fs, al = sinf(w0) / (2 * 0.7071f), c = cosf(w0), a0 = 1 + al;
-    biquad_t hp = { .b0 = (1 + c) / 2 / a0, .b1 = -(1 + c) / a0, .b2 = (1 + c) / 2 / a0,
-                    .a1 = -2 * c / a0, .a2 = (1 - al) / a0 };
-    // +3 dB peaking EQ at 3 kHz, Q = 1
-    float A = powf(10, 3.0f / 40), w1 = 2 * pi * 3000 / fs, al1 = sinf(w1) / 2, c1 = cosf(w1), d0 = 1 + al1 / A;
-    biquad_t pk = { .b0 = (1 + al1 * A) / d0, .b1 = -2 * c1 / d0, .b2 = (1 - al1 * A) / d0,
-                    .a1 = -2 * c1 / d0, .a2 = (1 - al1 / A) / d0 };
-
-    float *f = heap_caps_malloc(n * sizeof(float), MALLOC_CAP_SPIRAM);
-    if (!f) return;
-    double sum = 0;
-    size_t cnt = 0;
-    for (size_t i = 0; i < n; i++) {
-        f[i] = biquad(&pk, biquad(&hp, pcm[i] / 32768.0f));
-        if (fabsf(f[i]) > 0.02f) { sum += (double)f[i] * f[i]; cnt++; }
-    }
-    float rms = cnt ? sqrtf((float)(sum / cnt)) : 1e-3f;
-    float gain = powf(10, -13.0f / 20) / fmaxf(rms, 1e-6f);
-    const float knee = 0.6f;
-    for (size_t i = 0; i < n; i++) {
-        float v = f[i] * gain, m = fabsf(v);
-        if (m > knee) v = copysignf(knee + 0.35f * tanhf((m - knee) / 0.35f), v);
-        pcm[i] = (int16_t)(v * 32767);
-    }
-    free(f);
-}
-
-/** Trim silence, make it clear on the speaker, fade the edges. */
-static size_t tidy(int16_t *pcm, size_t n)
-{
-    const int thresh = 600;
-    size_t start = 0, end = n;
-    while (start < n && abs(pcm[start]) < thresh) start++;
-    while (end > start && abs(pcm[end - 1]) < thresh) end--;
-    if (end <= start) return 0;
-    start = start > OUT_RATE / 50 ? start - OUT_RATE / 50 : 0;     // keep 20 ms lead-in
-    end = end + OUT_RATE / 20 < n ? end + OUT_RATE / 20 : n;       // and 50 ms tail
-    n = end - start;
-    memmove(pcm, pcm + start, n * sizeof(int16_t));
-
-    speakerize(pcm, n);
-    size_t fade = OUT_RATE / 100;
-    for (size_t i = 0; i < fade && i < n; i++) {
-        pcm[i] = (int16_t)(pcm[i] * (float)i / fade);
-        pcm[n - 1 - i] = (int16_t)(pcm[n - 1 - i] * (float)i / fade);
-    }
-    return n;
-}
-
-/** Rough spoken length of a line, to catch Gemini answering instead of reading. */
-static bool plausible(const char *text, float seconds)
-{
-    float expect = 0.35f + strlen(text) * 0.065f;
-    return seconds > 0.25f && seconds < fmaxf(expect * 2.5f, expect + 2.5f);
-}
+// Resampling, clean-up and the take check live in components/dsp (unit-tested).
 
 static bool record_line(const char *dir, prompt_t p, int16_t *out16)
 {
@@ -347,16 +258,18 @@ static bool record_line(const char *dir, prompt_t p, int16_t *out16)
         vTaskDelay(pdMS_TO_TICKS(200));                              // last audio chunk
         if (s_abort || s_failed) return false;
 
-        size_t n16 = tidy(out16, resample(s_cap, s_cap_len, out16));
+        dsp_resampler_t rs;
+        dsp_resampler_reset(&rs);
+        size_t n16 = dsp_tidy(out16, dsp_resample_24_16(&rs, s_cap, s_cap_len, out16));
         float secs = (float)n16 / OUT_RATE;
-        if (!plausible(text, secs)) {
+        if (!dsp_take_plausible(text, secs)) {
             ESP_LOGW(TAG, "%s: %.1f s doesn't fit \"%s\", retrying", prompts_id(p), secs, text);
             continue;
         }
         // Encode in place (µ-law is 1 byte per sample) and write via a temp file,
         // so a line is never left half-written.
         uint8_t *enc = (uint8_t *)out16;
-        for (size_t i = 0; i < n16; i++) enc[i] = prompts_ulaw_encode(out16[i]);
+        for (size_t i = 0; i < n16; i++) enc[i] = dsp_ulaw_encode(out16[i]);
         char path[96], tmp[100];
         prompts_recorded_path(dir, p, path, sizeof(path));
         snprintf(tmp, sizeof(tmp), "%s.tmp", path);
@@ -379,7 +292,7 @@ static bool record_line(const char *dir, prompt_t p, int16_t *out16)
 
 static void record_task(void *arg)
 {
-    int16_t *out16 = heap_caps_malloc(OUT_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    int16_t *out16 = heap_caps_malloc(DSP_RESAMPLE_MAX_OUT(IN_RATE * MAX_SECONDS) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     s_cap = heap_caps_malloc(IN_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     char key[SETTINGS_API_KEY_MAX], dir[64], mode[16];
     read_lines(JOB_PATH, s_job_voice, sizeof(s_job_voice), mode, sizeof(mode));

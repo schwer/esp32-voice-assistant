@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "net.h"
 #include "setup_web.h"
+#include "web_util.h"
 #include "diag.h"
 #include "leds.h"
 #include "diag_page.h"
@@ -65,14 +66,7 @@ static void send_escaped(httpd_req_t *req, const char *s)
     char buf[128];
     size_t n = 0;
     for (; *s; s++) {
-        const char *rep = NULL;
-        switch (*s) {
-        case '&': rep = "&amp;"; break;
-        case '<': rep = "&lt;"; break;
-        case '>': rep = "&gt;"; break;
-        case '"': rep = "&quot;"; break;
-        case '\'': rep = "&#39;"; break;
-        }
+        const char *rep = web_html_entity(*s);
         if (n + 8 >= sizeof(buf)) {
             httpd_resp_send_chunk(req, buf, n);
             n = 0;
@@ -92,40 +86,13 @@ static void send_escaped(httpd_req_t *req, const char *s)
 
 #define SEND(req, s) httpd_resp_sendstr_chunk((req), (s))
 
-/** In-place application/x-www-form-urlencoded decode. */
-static void url_decode(char *s)
-{
-    char *o = s;
-    for (; *s; s++) {
-        if (*s == '+') {
-            *o++ = ' ';
-        } else if (*s == '%' && isxdigit((unsigned char)s[1]) && isxdigit((unsigned char)s[2])) {
-            char hex[3] = { s[1], s[2], 0 };
-            *o++ = (char)strtol(hex, NULL, 16);
-            s += 2;
-        } else {
-            *o++ = *s;
-        }
-    }
-    *o = 0;
-}
-
-static void trim(char *s)
-{
-    size_t n = strlen(s);
-    while (n && isspace((unsigned char)s[n - 1])) s[--n] = 0;
-    size_t i = 0;
-    while (s[i] && isspace((unsigned char)s[i])) i++;
-    if (i) memmove(s, s + i, n - i + 1);
-}
-
 static bool form_field(const char *body, const char *key, char *out, size_t len)
 {
     if (httpd_query_key_value(body, key, out, len) != ESP_OK) {
         return false;
     }
-    url_decode(out);
-    trim(out);
+    web_url_decode(out);
+    web_trim(out);
     return true;
 }
 
@@ -137,14 +104,9 @@ static bool form_field(const char *body, const char *key, char *out, size_t len)
 static bool same_origin(httpd_req_t *req)
 {
     char origin[96] = "", host[64] = "";
-    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
-        return true;                     // non-browser client, or same-origin GET-style form
-    }
-    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
-        return false;
-    }
-    const char *o = strstr(origin, "://");
-    return o && strcmp(o + 3, host) == 0;
+    bool has_origin = httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) == ESP_OK;
+    httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+    return web_same_origin(has_origin ? origin : NULL, host);
 }
 
 static esp_err_t forbid(httpd_req_t *req)

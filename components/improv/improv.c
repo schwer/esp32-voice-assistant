@@ -9,6 +9,7 @@
 #include "sdkconfig.h"
 #include "net.h"
 #include "improv.h"
+#include "improv_proto.h"
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/uart.h"
@@ -20,16 +21,23 @@ typedef enum { PORT_UART0, PORT_USB_JTAG } port_t;
 
 static const char *TAG = "improv";
 
-enum { TYPE_STATE = 0x01, TYPE_ERROR = 0x02, TYPE_RPC = 0x03, TYPE_RPC_RESULT = 0x04 };
-enum { STATE_READY = 0x02, STATE_PROVISIONING = 0x03, STATE_PROVISIONED = 0x04 };
-enum { ERR_NONE = 0x00, ERR_INVALID_RPC = 0x01, ERR_UNKNOWN_RPC = 0x02,
-       ERR_UNABLE_TO_CONNECT = 0x03, ERR_UNKNOWN = 0xFF };
-enum { CMD_WIFI_SETTINGS = 0x01, CMD_GET_STATE = 0x02, CMD_GET_INFO = 0x03,
-       CMD_GET_NETWORKS = 0x04,
-       CMD_VENDOR_STATUS = 0xF0 };   // ours: [ssid, setup URL, rssi, saved ssid] for the install page
-
-static const uint8_t HEADER[6] = {'I', 'M', 'P', 'R', 'O', 'V'};
-#define VERSION 1
+// Protocol constants, encoding and parsing: improv_proto.c (unit-tested on the host).
+#define TYPE_STATE        IMPROV_TYPE_STATE
+#define TYPE_ERROR        IMPROV_TYPE_ERROR
+#define TYPE_RPC          IMPROV_TYPE_RPC
+#define TYPE_RPC_RESULT   IMPROV_TYPE_RESULT
+#define STATE_READY       IMPROV_STATE_READY
+#define STATE_PROVISIONING IMPROV_STATE_PROVISIONING
+#define STATE_PROVISIONED IMPROV_STATE_PROVISIONED
+#define ERR_NONE          IMPROV_ERR_NONE
+#define ERR_INVALID_RPC   IMPROV_ERR_INVALID_RPC
+#define ERR_UNKNOWN_RPC   IMPROV_ERR_UNKNOWN_RPC
+#define ERR_UNABLE_TO_CONNECT IMPROV_ERR_UNABLE_TO_CONNECT
+#define CMD_WIFI_SETTINGS IMPROV_CMD_WIFI_SETTINGS
+#define CMD_GET_STATE     IMPROV_CMD_GET_STATE
+#define CMD_GET_INFO      IMPROV_CMD_GET_INFO
+#define CMD_GET_NETWORKS  IMPROV_CMD_GET_NETWORKS
+#define CMD_VENDOR_STATUS IMPROV_CMD_VENDOR_STATUS
 
 static void port_write(port_t port, const uint8_t *data, size_t len)
 {
@@ -50,43 +58,19 @@ static int port_read(port_t port, uint8_t *buf, size_t len)
 
 static void send_packet(port_t port, uint8_t type, const uint8_t *data, uint8_t len)
 {
-    uint8_t pkt[6 + 3 + 255 + 1 + 1];
-    size_t n = 0;
-    memcpy(pkt, HEADER, 6);
-    n = 6;
-    pkt[n++] = VERSION;
-    pkt[n++] = type;
-    pkt[n++] = len;
-    memcpy(&pkt[n], data, len);
-    n += len;
-    uint8_t sum = 0;
-    for (size_t i = 0; i < n; i++) {
-        sum += pkt[i];
-    }
-    pkt[n++] = sum;
-    pkt[n++] = '\n';
-    port_write(port, pkt, n);
+    uint8_t pkt[IMPROV_MAX_PACKET];
+    port_write(port, pkt, improv_encode(type, data, len, pkt));
 }
 
 static void send_state(port_t port, uint8_t state) { send_packet(port, TYPE_STATE, &state, 1); }
 static void send_error(port_t port, uint8_t err)   { send_packet(port, TYPE_ERROR, &err, 1); }
 
 /** RPC result: [cmd][total len][len][str]... */
+/** RPC result: [cmd][total len][len][str]... */
 static void send_result(port_t port, uint8_t cmd, const char *const *strs, int count)
 {
     uint8_t buf[255];
-    size_t n = 2;
-    for (int i = 0; i < count; i++) {
-        size_t l = strlen(strs[i]);
-        if (n + 1 + l > sizeof(buf)) {
-            break;
-        }
-        buf[n++] = (uint8_t)l;
-        memcpy(&buf[n], strs[i], l);
-        n += l;
-    }
-    buf[0] = cmd;
-    buf[1] = (uint8_t)(n - 2);
+    size_t n = improv_result_payload(cmd, strs, count, buf);
     send_packet(port, TYPE_RPC_RESULT, buf, (uint8_t)n);
 }
 
@@ -103,11 +87,12 @@ static void send_url(port_t port, uint8_t cmd)
 
 static void handle_rpc(port_t port, const uint8_t *d, uint8_t len)
 {
-    if (len < 2 || d[1] != len - 2) {
+    uint8_t cmd, args_len;
+    const uint8_t *args;
+    if (!improv_rpc_split(d, len, &cmd, &args, &args_len)) {
         send_error(port, ERR_INVALID_RPC);
         return;
     }
-    const uint8_t cmd = d[0];
     switch (cmd) {
     case CMD_GET_STATE:
         if (net_is_connected()) {
@@ -126,21 +111,11 @@ static void handle_rpc(port_t port, const uint8_t *d, uint8_t len)
     }
 
     case CMD_WIFI_SETTINGS: {
-        // [ssid_len][ssid][pass_len][pass]
-        const uint8_t *p = &d[2];
-        uint8_t ssid_len = p[0];
-        if (2 + 1 + ssid_len + 1 > len) {
+        char ssid[33], pass[65];
+        if (!improv_parse_wifi(args, args_len, ssid, pass)) {
             send_error(port, ERR_INVALID_RPC);
             return;
         }
-        uint8_t pass_len = p[1 + ssid_len];
-        if (2 + 1 + ssid_len + 1 + pass_len > len || ssid_len > 32 || pass_len > 64) {
-            send_error(port, ERR_INVALID_RPC);
-            return;
-        }
-        char ssid[33] = {0}, pass[65] = {0};
-        memcpy(ssid, &p[1], ssid_len);
-        memcpy(pass, &p[2 + ssid_len], pass_len);
 
         send_error(port, ERR_NONE);
         send_state(port, STATE_PROVISIONING);
@@ -191,42 +166,18 @@ static void handle_rpc(port_t port, const uint8_t *d, uint8_t len)
 static void improv_task(void *arg)
 {
     const port_t port = (port_t)(intptr_t)arg;
-    uint8_t buf[6 + 3 + 255 + 1];
-    size_t pos = 0;
+    improv_parser_t parser;
+    improv_parser_reset(&parser);
+    improv_packet_t pkt;
     uint8_t c;
-
     for (;;) {
-        if (port_read(port, &c, 1) != 1) {
-            continue;
-        }
-        // Match the header byte by byte; resync on mismatch.
-        if (pos < 6) {
-            if (c == HEADER[pos]) {
-                buf[pos++] = c;
-            } else {
-                pos = (c == HEADER[0]) ? 1 : 0;
-                if (pos) buf[0] = c;
-            }
-            continue;
-        }
-        buf[pos++] = c;
-        if (pos < 9) {
-            continue;                                   // version, type, length
-        }
-        const uint8_t len = buf[8];
-        if (pos < 9u + len + 1u) {
-            continue;                                   // data + checksum
-        }
-        uint8_t sum = 0;
-        for (size_t i = 0; i < 9u + len; i++) {
-            sum += buf[i];
-        }
-        if (buf[6] == VERSION && sum == buf[9 + len] && buf[7] == TYPE_RPC) {
-            handle_rpc(port, &buf[9], len);
-        } else if (sum != buf[9 + len]) {
+        if (port_read(port, &c, 1) != 1) continue;
+        int r = improv_parser_feed(&parser, c, &pkt);
+        if (r > 0 && pkt.version == IMPROV_VERSION && pkt.type == TYPE_RPC) {
+            handle_rpc(port, pkt.data, pkt.len);
+        } else if (r < 0) {
             send_error(port, ERR_INVALID_RPC);
         }
-        pos = 0;
     }
 }
 

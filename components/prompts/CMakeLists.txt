@@ -12,7 +12,7 @@ endforeach()
 idf_component_register(
     SRCS "prompts.c"
     INCLUDE_DIRS "include"
-    PRIV_REQUIRES audio settings esp_hw_support
+    PRIV_REQUIRES audio settings esp_hw_support dsp
     EMBED_FILES ${clip_files}
     EMBED_TXTFILES "${CMAKE_CURRENT_LIST_DIR}/../../tools/prompts.tsv" "clips/voice.txt"
 )
