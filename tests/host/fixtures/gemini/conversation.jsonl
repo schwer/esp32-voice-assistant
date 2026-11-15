@@ -1,0 +1,10 @@
+{"setupComplete":{}}
+{"serverContent":{"inputTranscription":{"text":"What's the"}}}
+{"serverContent":{"inputTranscription":{"text":" weather tomorrow?"}}}
+{"toolCall":{"functionCalls":[{"id":"fc-1","name":"get_weather","args":{"days":2}}]}}
+{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AADoAxj8/38AgDkwx88BAA=="}}]},"outputTranscription":{"text":"Tomorrow will be"}}}
+{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"BQD7/ywB1P4="}}]},"outputTranscription":{"text":" sunny and mild."}}}
+{"serverContent":{"generationComplete":true}}
+{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":812,"responseTokenCount":95,"totalTokenCount":907}}
+{"sessionResumptionUpdate":{"newHandle":"abc","resumable":true}}
+{"goAway":{"timeLeft":"10s"}}

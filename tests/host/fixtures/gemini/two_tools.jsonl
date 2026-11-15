@@ -1,0 +1,3 @@
+{"setupComplete":{}}
+{"toolCall":{"functionCalls":[{"id":"fc-7","name":"get_battery_status","args":{}},{"id":"fc-8","name":"get_weather","args":{"location":"Paris, France"}}]}}
+{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"BQD7/ywB1P4="}},{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AADoAxj8/38AgDkwx88BAA=="}}]},"outputTranscription":{"text":"Battery is fine; Paris is rainy."},"turnComplete":true}}

@@ -113,7 +113,7 @@ CI (`.github/workflows/test.yml`) runs on every push and pull request:
 
 | Suite | What it covers | Run locally |
 |---|---|---|
-| Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers. Built with AddressSanitizer + UBSan. | `make -C tests/host` |
+| Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers, and Gemini Live messages: what the firmware sends, plus whole server conversations replayed from `tests/host/fixtures/gemini` (hand-written in the API's message shapes; no API key needed). Built with AddressSanitizer + UBSan. | `make -C tests/host` |
 | Tool checks (Python) | Firmware parts never overlap NVS, manifest format, partition table, phrase list / enum / clips stay in sync | `python -m pytest tests/tools` |
 | Browser tests (Playwright) | Installer against a simulated board (Improv over Web Serial), diagnostics page, setup page's recording progress | `cd tests/web && npm ci && npx playwright install chromium && npx playwright test` |
 
@@ -122,7 +122,8 @@ battery readings) still needs a board: use the diagnostics page's tests.
 
 Hardware-independent code lives in modules without ESP-IDF dependencies so it can be tested
 on a normal computer: `components/dsp`, `components/battery/battery_est.c`,
-`components/improv/improv_proto.c`, `components/setup_web/web_util.c`.
+`components/improv/improv_proto.c`, `components/setup_web/web_util.c`,
+`components/gemini_live/gemini_proto.c`.
 
 ## Security notes
 
