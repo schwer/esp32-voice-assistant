@@ -4,10 +4,11 @@
 // tests) are recorded at runtime by asking Gemini Live to read tools/prompts.tsv in
 // the voice used for conversations, and overwrite the built-in clips.
 //
-// A new set is recorded next to the current one and switched in only when complete,
-// and conversations keep the current set's voice until then, so the user never hears
-// two voices. Recording happens when the messages aren't in the selected voice (first
-// setup, or after changing the voice) or when asked from the diagnostics page.
+// The most-heard lines (wake-word answers, "Ready", "Settings saved") are recorded
+// first, in about 15 seconds; then messages and conversations switch to the new voice
+// together. The remaining, rarer lines are recorded while the device is idle.
+// Recording happens when the messages aren't in the selected voice (first setup, or
+// after changing the voice) or when asked from the diagnostics page.
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,10 +21,16 @@ const char *voicepack_active_voice(void);
 /** Gemini voice to use for conversations, so they match the messages. */
 const char *voicepack_conversation_voice(void);
 
-/** True if the messages aren't in the selected voice yet (or a re-record was requested). */
+/** True while any line still needs recording (or a re-record was requested). */
 bool voicepack_needed(void);
-/** Record in the background (call when online, idle, with an API key). */
-esp_err_t voicepack_start(void);
+/** True while the most-heard lines ("Yes?", "Ready...") aren't in the selected voice yet. */
+bool voicepack_priority_pending(void);
+/**
+ * Record in the background (call when online, not in a conversation, with an API key).
+ * The most-heard lines go first and switch the voice over as soon as they exist;
+ * include_rest also records the remaining lines (do that when the device is idle).
+ */
+esp_err_t voicepack_start(bool include_rest);
 bool voicepack_busy(void);
 /** Stop now (e.g. the user said "Jarvis"); unfinished lines are recorded later. */
 void voicepack_abort(void);

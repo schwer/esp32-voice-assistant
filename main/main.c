@@ -257,10 +257,16 @@ static void check_voicepack(void)
         xTaskGetTickCount() - last_attempt < pdMS_TO_TICKS(10 * 60 * 1000)) {
         return;
     }
+    // The main lines go right away; the rarer ones only after 2 quiet minutes.
+    int64_t last = s_last_activity_us > setup_web_last_activity_us() ? s_last_activity_us
+                                                                      : setup_web_last_activity_us();
+    bool idle_long = esp_timer_get_time() - last > 2LL * 60 * 1000000;
+    if (!voicepack_priority_pending() && !idle_long) return;
     attempted = true;
     last_attempt = xTaskGetTickCount();
-    ESP_LOGI(TAG, "recording status messages in %s's voice", settings_get_voice());
-    voicepack_start();
+    ESP_LOGI(TAG, "recording %s messages in %s's voice", idle_long ? "all remaining" : "the main",
+             settings_get_voice());
+    voicepack_start(idle_long);
 }
 
 /**

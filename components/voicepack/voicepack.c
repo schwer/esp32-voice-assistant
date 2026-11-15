@@ -80,12 +80,47 @@ static bool set_complete(const char *voice)
     return exists(path);
 }
 
+// Heard most often: recorded first (about 15 s), then the voice switches over.
+// The other lines are recorded later, while the device is idle.
+static const prompt_t PRIORITY[] = {
+    PROMPT_WAKE_ACK_1, PROMPT_WAKE_ACK_2, PROMPT_WAKE_ACK_3, PROMPT_READY, PROMPT_SETTINGS_SAVED,
+};
+#define N_PRIORITY ((int)(sizeof(PRIORITY) / sizeof(PRIORITY[0])))
+
+static bool is_priority(prompt_t p)
+{
+    for (int i = 0; i < N_PRIORITY; i++) if (PRIORITY[i] == p) return true;
+    return false;
+}
+
+/** Recording order: priority lines, then the rest. */
+static int recording_order(prompt_t *order)
+{
+    int n = 0;
+    for (int i = 0; i < N_PRIORITY; i++) order[n++] = PRIORITY[i];
+    for (int p = 0; p < PROMPT_COUNT; p++) if (!is_priority((prompt_t)p)) order[n++] = (prompt_t)p;
+    return n;
+}
+
 static bool line_recorded(const char *voice, prompt_t p)
 {
     char dir[64], path[96];
     voice_dir(voice, dir, sizeof(dir));
     prompts_recorded_path(dir, p, path, sizeof(path));
     return exists(path);
+}
+
+static bool has_priority_lines(const char *voice)
+{
+    for (int i = 0; i < N_PRIORITY; i++) if (!line_recorded(voice, PRIORITY[i])) return false;
+    return true;
+}
+
+static int redo_progress(void)
+{
+    char v[16];
+    read_line(REDO_PATH, v, sizeof(v));
+    return v[0] ? atoi(v) : -1;                      // -1 = no re-record requested
 }
 
 static void remove_dir(const char *dir)
@@ -150,6 +185,14 @@ const char *voicepack_conversation_voice(void)
 bool voicepack_needed(void)
 {
     if (exists(REDO_PATH)) return true;
+    if (strcmp(s_active, settings_get_voice()) != 0) return true;
+    return !set_complete(s_active);                  // the less common lines are still missing
+}
+
+bool voicepack_priority_pending(void)
+{
+    int redo = redo_progress();
+    if (redo >= 0 && redo < N_PRIORITY) return true;
     return strcmp(s_active, settings_get_voice()) != 0;
 }
 
@@ -166,12 +209,20 @@ bool voicepack_just_finished(void)
 void voicepack_status(char *buf, size_t len)
 {
     if (s_busy) {
-        snprintf(buf, len, "recording messages in %s's voice (%d of %d); until then everything stays in %s's voice",
-                 s_recording_voice, s_done + 1, s_total, voicepack_active_voice());
+        if (strcmp(s_active, s_recording_voice) != 0) {
+            snprintf(buf, len, "recording the main messages in %s's voice (%d of %d); until then everything stays in %s's voice",
+                     s_recording_voice, s_done + 1, s_total, voicepack_active_voice());
+        } else {
+            snprintf(buf, len, "%s's voice is in use; recording messages (%d of %d) while idle",
+                     s_recording_voice, s_done + 1, s_total);
+        }
     } else if (s_state[0]) {
         strlcpy(buf, s_state, len);
+    } else if (voicepack_priority_pending()) {
+        snprintf(buf, len, "will record the main messages in %s's voice as soon as it's online", settings_get_voice());
     } else if (voicepack_needed()) {
-        snprintf(buf, len, "will record messages in %s's voice when online and idle", settings_get_voice());
+        snprintf(buf, len, "%s's voice is in use; the less common messages are recorded when the board is idle",
+                 voicepack_active_voice());
     } else {
         snprintf(buf, len, "messages and conversations use %s's voice", voicepack_active_voice());
     }
@@ -184,7 +235,7 @@ esp_err_t voicepack_init(void)
     s_turn_sem = xSemaphoreCreateBinary();
     char v[32];
     read_line(ACTIVE_PATH, v, sizeof(v));
-    activate(v[0] && set_complete(v) ? v : "");
+    activate(v[0] && (set_complete(v) || has_priority_lines(v)) ? v : "");
     ESP_LOGI(TAG, "messages in %s's voice", voicepack_active_voice());
     return ESP_OK;
 }
@@ -211,7 +262,7 @@ esp_err_t voicepack_rerecord(void)
         for (int i = 0; i < 100 && s_busy; i++) vTaskDelay(pdMS_TO_TICKS(50));
         if (s_busy) return ESP_ERR_TIMEOUT;
     }
-    write_line(REDO_PATH, settings_get_voice());
+    write_line(REDO_PATH, "0");                      // overwrite every line, priority lines first
     s_state[0] = 0;
     s_last_failed = false;
     ESP_LOGI(TAG, "re-record requested in %s's voice", settings_get_voice());
@@ -374,28 +425,35 @@ static bool record_line(const char *dir, prompt_t p, int16_t *out16)
     return false;
 }
 
+static volatile bool s_include_rest;
+
 static void record_task(void *arg)
 {
     int16_t *out16 = heap_caps_malloc(OUT_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     s_cap = heap_caps_malloc(IN_RATE * MAX_SECONDS * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     char key[SETTINGS_API_KEY_MAX], dir[64];
     const char *voice = s_recording_voice;
-    bool redo = exists(REDO_PATH);
+    int redo = redo_progress();                       // re-record: overwrite every line in order
     int missing = 0;
     s_failed = false;
     s_state[0] = 0;
 
     voice_dir(voice, dir, sizeof(dir));
-    if (redo) remove_dir(dir);                        // fresh takes of every line
     remove_other_sets(voice, s_active);              // keep only the set in use + the new one
     mkdir(dir, 0755);
 
-    // Only the lines not recorded yet (an interrupted run resumes where it stopped).
-    s_total = 0;
-    for (int p = 0; p < PROMPT_COUNT; p++) if (!line_recorded(voice, (prompt_t)p)) s_total++;
+    prompt_t order[PROMPT_COUNT];
+    int n_order = recording_order(order);
+    int limit = s_include_rest ? n_order : N_PRIORITY;
+    prompt_t todo[PROMPT_COUNT];
+    int n_todo = 0, first = redo >= 0 ? redo : 0;
+    for (int i = first; i < limit; i++) {
+        if (redo >= 0 || !line_recorded(voice, order[i])) todo[n_todo++] = order[i];
+    }
+    s_total = n_todo;
     s_done = 0;
 
-    if (s_total > 0) {
+    if (n_todo > 0) {
         if (!out16 || !s_cap || settings_get_api_key(key, sizeof(key)) != ESP_OK) {
             snprintf(s_state, sizeof(s_state), "couldn't record: %s", out16 && s_cap ? "no API key" : "out of memory");
             goto done;
@@ -424,13 +482,45 @@ static void record_task(void *arg)
             gemini_live_stop();
             goto done;
         }
-        for (int p = 0; p < PROMPT_COUNT && !s_abort && !s_failed; p++) {
-            if (line_recorded(voice, (prompt_t)p)) continue;
-            if (!record_line(dir, (prompt_t)p, out16)) missing++;
+        for (int i = 0; i < n_todo && !s_abort && !s_failed; i++) {
+            if (record_line(dir, todo[i], out16)) {
+                if (redo >= 0) {                      // remember progress across interruptions
+                    char v[16];
+                    snprintf(v, sizeof(v), "%d", first + i + 1);
+                    write_line(REDO_PATH, v);
+                }
+            } else {
+                missing++;
+                if (redo >= 0) break;                 // keep the order: retry from here later
+            }
             s_done++;
+            // As soon as the main lines exist, switch messages + conversations to this voice.
+            if (strcmp(s_active, voice) != 0 && has_priority_lines(voice)) {
+                char old[32];
+                strlcpy(old, s_active, sizeof(old));
+                activate(voice);
+                if (old[0]) {
+                    char old_dir[64];
+                    voice_dir(old, old_dir, sizeof(old_dir));
+                    remove_dir(old_dir);
+                }
+                s_finished = true;                    // main says "Ready" in the new voice
+                ESP_LOGI(TAG, "main messages recorded: switched to %s's voice", voice);
+            }
             vTaskDelay(pdMS_TO_TICKS(300));
         }
         gemini_live_stop();
+    }
+
+    // Everything recorded?
+    bool all = true;
+    for (int p = 0; p < PROMPT_COUNT; p++) if (!line_recorded(voice, (prompt_t)p)) all = false;
+    if (redo >= 0 && redo_progress() < n_order) all = false;
+    if (all) {
+        char done_path[96];
+        snprintf(done_path, sizeof(done_path), "%s/complete", dir);
+        write_line(done_path, voice);
+        remove(REDO_PATH);
     }
 
     if (s_abort) {
@@ -441,26 +531,15 @@ static void record_task(void *arg)
     } else if (missing > 0) {
         snprintf(s_state, sizeof(s_state), "%d line(s) didn't record cleanly in %s's voice; will retry in 10 minutes",
                  missing, voice);
+    } else if (all) {
+        snprintf(s_state, sizeof(s_state), "all messages and conversations use %s's voice", voice);
     } else {
-        // Every line is recorded: switch messages and conversations over together.
-        char done_path[96];
-        snprintf(done_path, sizeof(done_path), "%s/complete", dir);
-        write_line(done_path, voice);
-        char old[32];
-        strlcpy(old, s_active, sizeof(old));
-        activate(voice);
-        remove(REDO_PATH);
-        if (old[0] && strcmp(old, voice) != 0) {
-            char old_dir[64];
-            voice_dir(old, old_dir, sizeof(old_dir));
-            remove_dir(old_dir);
-        }
-        snprintf(s_state, sizeof(s_state), "messages and conversations use %s's voice", voice);
-        s_finished = true;
+        s_state[0] = 0;                               // main lines done; the rest when idle
     }
 done:
-    s_last_failed = !s_finished && !s_abort;
-    ESP_LOGI(TAG, "%s", s_state);
+    s_last_failed = missing > 0 || (s_failed && !s_abort) ||
+                    (n_todo > 0 && strstr(s_state, "couldn't") != NULL);
+    ESP_LOGI(TAG, "%s", s_state[0] ? s_state : "main messages recorded; the rest when idle");
     free(out16);
     free(s_cap);
     s_cap = NULL;
@@ -469,9 +548,10 @@ done:
     vTaskDelete(NULL);
 }
 
-esp_err_t voicepack_start(void)
+esp_err_t voicepack_start(bool include_rest)
 {
     if (s_busy) return ESP_ERR_INVALID_STATE;
+    s_include_rest = include_rest;
     strlcpy(s_recording_voice, settings_get_voice(), sizeof(s_recording_voice));
     s_busy = true;
     s_abort = false;
