@@ -191,31 +191,39 @@ static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
 }
 
 /**
- * Announce low battery once at 10% and once at 4% (re-armed after charging past 20%).
- * Only while idle, so it never talks over a conversation.
+ * Battery level and warnings. The level is a steady, at-rest estimate (see battery.h).
+ * "Low" (10%) and "almost empty" (4%) are announced once each, only after the level has
+ * stayed there for 2 minutes, and only while idle; re-armed after charging past 20%.
  */
 static void check_battery(void)
 {
     static bool warned_low, warned_critical;
-    battery_tick();                                    // history for get_battery_status
+    static int low_ticks, critical_ticks;              // consecutive 5 s checks at/below
+    battery_tick(!wakeword_is_idle() || audio_is_playing());
     battery_status_t b;
     battery_read(&b);
-    char s[48];
+    char s[64];
     if (b.present) {
-        snprintf(s, sizeof(s), "%d%% (%.2f V)", b.percent, b.volts);
+        snprintf(s, sizeof(s), "%d%% (%.2f V at rest)", b.percent, b.volts);
     } else {
         snprintf(s, sizeof(s), "no battery detected");
     }
     diag_set_status("battery", s);
-    if (!b.present) return;
+    if (!b.present) {
+        low_ticks = critical_ticks = 0;
+        return;
+    }
     if (b.percent >= 20) {
         warned_low = warned_critical = false;
     }
+    low_ticks = b.percent <= 10 ? low_ticks + 1 : 0;
+    critical_ticks = b.percent <= 4 ? critical_ticks + 1 : 0;
+    const int sustained = 24;                          // 24 x 5 s = 2 minutes
     if (!wakeword_is_idle() || audio_is_playing()) return;
-    if (b.percent <= 4 && !warned_critical) {
+    if (critical_ticks >= sustained && !warned_critical) {
         warned_critical = warned_low = true;
         prompts_say(PROMPT_BATTERY_CRITICAL);
-    } else if (b.percent <= 10 && !warned_low) {
+    } else if (low_ticks >= sustained && !warned_low) {
         warned_low = true;
         prompts_say(PROMPT_BATTERY_LOW);
     }

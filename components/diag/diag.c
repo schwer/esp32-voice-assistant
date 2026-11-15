@@ -232,7 +232,7 @@ cJSON *diag_snapshot(void)
         char v[48];
         snprintf(v, sizeof(v), "%d%%", (int)cJSON_GetNumberValue(cJSON_GetObjectItem(rep, "percent")));
         cJSON_AddStringToObject(b, "level", v);
-        snprintf(v, sizeof(v), "%s V", cJSON_GetStringValue(cJSON_GetObjectItem(rep, "voltage")));
+        snprintf(v, sizeof(v), "%s V (at rest, 2-minute average)", cJSON_GetStringValue(cJSON_GetObjectItem(rep, "voltage")));
         cJSON_AddStringToObject(b, "voltage", v);
         const char *trend = cJSON_GetStringValue(cJSON_GetObjectItem(rep, "trend"));
         if (trend) cJSON_AddStringToObject(b, "status", trend);
@@ -243,7 +243,10 @@ cJSON *diag_snapshot(void)
         }
         const char *health = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(rep, "health"), "assessment"));
         if (health) cJSON_AddStringToObject(b, "health", health);
-        cJSON_AddNumberToObject(b, "sense_pin", bat.gpio);
+        snprintf(v, sizeof(v), "%.2f V (noise +/- %.0f mV)", bat.last_raw_v, bat.spread_mv);
+        cJSON_AddStringToObject(b, "latest_single_reading", v);
+        snprintf(v, sizeof(v), "GPIO%d, %.0f:1 divider%s", bat.gpio, bat.divider, bat.locked ? "" : " (confirming)");
+        cJSON_AddStringToObject(b, "sense_pin", v);
     } else {
         cJSON_AddStringToObject(b, "level", "unknown");
         cJSON_AddStringToObject(b, "status", "No battery reading. If a battery is connected, send the two pin "
