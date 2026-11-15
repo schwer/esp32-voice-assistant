@@ -107,6 +107,23 @@ idf.py menuconfig      # Voice Assistant → timezone, API key / token URL (dev 
 idf.py build flash monitor
 ```
 
+## Testing
+
+CI (`.github/workflows/test.yml`) runs on every push and pull request:
+
+| Suite | What it covers | Run locally |
+|---|---|---|
+| Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers. Built with AddressSanitizer + UBSan. | `make -C tests/host` |
+| Tool checks (Python) | Firmware parts never overlap NVS, manifest format, partition table, phrase list / enum / clips stay in sync | `python -m pytest tests/tools` |
+| Browser tests (Playwright) | Installer against a simulated board (Improv over Web Serial), diagnostics page, setup page's recording progress | `cd tests/web && npm ci && npx playwright install chromium && npx playwright test` |
+
+The firmware build (`build.yml`) is the compile check. Hardware behaviour (audio, wake word,
+battery readings) still needs a board: use the diagnostics page's tests.
+
+Hardware-independent code lives in modules without ESP-IDF dependencies so it can be tested
+on a normal computer: `components/dsp`, `components/battery/battery_est.c`,
+`components/improv/improv_proto.c`, `components/setup_web/web_util.c`.
+
 ## Security notes
 
 - Embedding an API key in firmware is for **prototyping only**. Use ephemeral tokens

@@ -40,6 +40,8 @@ typedef struct {
     int minute_n;
     int64_t minute_start_us;
     float max_v;
+    bool seeded_busy;             // first value came from a loaded reading: replace it
+    int64_t start_us;             // first update (the level settles freely for 2 minutes)
 } batt_est_t;
 
 void batt_est_reset(batt_est_t *e);

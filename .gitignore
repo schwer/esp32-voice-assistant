@@ -9,3 +9,7 @@ sdkconfig.old
 __pycache__/
 .env
 secrets.*
+tests/host/build/
+tests/web/node_modules/
+tests/web/test-results/
+tests/web/playwright-report/

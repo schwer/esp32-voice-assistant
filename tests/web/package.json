@@ -1,0 +1,11 @@
+{
+  "name": "esp32-voice-assistant-web-tests",
+  "private": true,
+  "description": "Browser tests for the installer, setup and diagnostics pages, against a simulated board",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

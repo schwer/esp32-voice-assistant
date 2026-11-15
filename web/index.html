@@ -232,12 +232,18 @@ class Improv {
         return;
       }
       if (i > 0) log(dec.decode(new Uint8Array(this.buf.splice(0, i))));
+      // "IMPROV" can appear in log text: check version and type right after the header,
+      // and on a bad checksum skip just one byte, so a false header can't swallow the
+      // real packet that follows (same rule as the firmware's parser).
+      const bogus = (this.buf.length > 6 && this.buf[6] !== 1) ||
+                    (this.buf.length > 7 && (this.buf[7] < T_STATE || this.buf[7] > T_RESULT));
+      if (bogus) { log(dec.decode(new Uint8Array(this.buf.splice(0, 1)))); continue; }
       if (this.buf.length < 9) return;
       const len = this.buf[8];
       if (this.buf.length < 10 + len) return;
+      const sum = this.buf.slice(0, 9 + len).reduce((a, b) => (a + b) & 0xff, 0);
+      if (sum !== this.buf[9 + len]) { log(dec.decode(new Uint8Array(this.buf.splice(0, 1)))); continue; }
       const pkt = this.buf.splice(0, 10 + len);
-      const sum = pkt.slice(0, 9 + len).reduce((a, b) => (a + b) & 0xff, 0);
-      if (sum !== pkt[9 + len]) continue;
       const msg = { type: pkt[7], data: pkt.slice(9, 9 + len) };
       for (const fn of [...this.listeners]) fn(msg);
     }

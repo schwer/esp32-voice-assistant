@@ -106,12 +106,17 @@ static void history_add(batt_est_t *e, float v, int64_t now)
     }
 }
 
+#define WARMUP_US (120LL * 1000000)
+
 void batt_est_update(batt_est_t *e, float v, bool busy, int64_t now)
 {
+    if (!e->start_us) e->start_us = now;
     bool stale = e->avg_us && now - e->avg_us > STALE_US;
     if (!busy || e->avg_v == 0 || stale) {
-        if (e->avg_v == 0) {
+        if (e->avg_v == 0 || (e->seeded_busy && !busy)) {
+            // First value, or the first rest reading after a sagging (busy) first value.
             e->avg_v = v;
+            e->seeded_busy = busy;
         } else {
             float dt = (now - e->avg_us) / 1e6f;
             float a = 1.0f - expf(-dt / TAU_S);
@@ -121,8 +126,12 @@ void batt_est_update(batt_est_t *e, float v, bool busy, int64_t now)
         history_add(e, e->avg_v, now);
     }
     // Steady percentage: falls while discharging, rises only when clearly charging.
+    // During the first two minutes it settles freely in either direction.
     int pct = batt_percent_for(e->avg_v);
-    if (e->shown_pct < 0 || pct < e->shown_pct || pct >= e->shown_pct + CHARGE_JUMP) e->shown_pct = pct;
+    bool warming_up = now - e->start_us < WARMUP_US;
+    if (e->shown_pct < 0 || warming_up || pct < e->shown_pct || pct >= e->shown_pct + CHARGE_JUMP) {
+        e->shown_pct = pct;
+    }
 }
 
 bool batt_est_slope(const batt_est_t *e, int minutes, float *out)

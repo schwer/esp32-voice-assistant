@@ -41,6 +41,13 @@ void improv_parser_reset(improv_parser_t *p)
     p->pos = 0;
 }
 
+/** Restart header matching with `c` as a possible first byte. */
+static void resync(improv_parser_t *p, uint8_t c)
+{
+    p->pos = (c == HEADER[0]) ? 1 : 0;
+    if (p->pos) p->buf[0] = c;
+}
+
 int improv_parser_feed(improv_parser_t *p, uint8_t c, improv_packet_t *out)
 {
     // Match the header byte by byte; resync on mismatch.
@@ -48,9 +55,15 @@ int improv_parser_feed(improv_parser_t *p, uint8_t c, improv_packet_t *out)
         if (c == HEADER[p->pos]) {
             p->buf[p->pos++] = c;
         } else {
-            p->pos = (c == HEADER[0]) ? 1 : 0;
-            if (p->pos) p->buf[0] = c;
+            resync(p, c);
         }
+        return 0;
+    }
+    // "IMPROV" can appear in log text. Check the version and type right away, so a false
+    // header can't swallow the real packet that follows it.
+    if ((p->pos == 6 && c != IMPROV_VERSION) ||
+        (p->pos == 7 && (c < IMPROV_TYPE_STATE || c > IMPROV_TYPE_RESULT))) {
+        resync(p, c);
         return 0;
     }
     p->buf[p->pos++] = c;
