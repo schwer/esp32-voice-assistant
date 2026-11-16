@@ -41,6 +41,13 @@ esp_err_t settings_set_fahrenheit(bool on);
 bool settings_get_search(void);
 esp_err_t settings_set_search(bool on);
 
+/** Let the user interrupt the assistant while it talks. Default on. */
+bool settings_get_barge_in(void);
+esp_err_t settings_set_barge_in(bool on);
+/** Only answer speech meant for the assistant (Gemini "proactive audio"). Default on. */
+bool settings_get_proactive(void);
+esp_err_t settings_set_proactive(bool on);
+
 /** Battery saver: Wi-Fi off after a few quiet minutes when running on battery. Default on. */
 bool settings_get_battery_saver(void);
 esp_err_t settings_set_battery_saver(bool on);

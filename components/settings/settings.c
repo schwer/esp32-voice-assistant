@@ -15,7 +15,7 @@ static bool s_spoken = true;
 static char s_model[SETTINGS_MODEL_MAX];
 static char s_voice[SETTINGS_VOICE_MAX];
 static char s_location[SETTINGS_LOCATION_MAX];
-static bool s_fahrenheit, s_search = true, s_saver = true;
+static bool s_fahrenheit, s_search = true, s_saver = true, s_barge = true, s_proactive = true;
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
 {
@@ -49,6 +49,11 @@ esp_err_t settings_init(void)
     uint8_t search = 1;
     nvs_get_u8(h, "search", &search);
     s_search = search != 0;
+    uint8_t barge = 1, proactive = 1;
+    nvs_get_u8(h, "barge", &barge);
+    nvs_get_u8(h, "proactive", &proactive);
+    s_barge = barge != 0;
+    s_proactive = proactive != 0;
     uint8_t saver = 1;
     nvs_get_u8(h, "saver", &saver);
     s_saver = saver != 0;
@@ -156,5 +161,20 @@ esp_err_t settings_set_battery_saver(bool on)
 {
     esp_err_t err = save_u8("saver", on);
     if (err == ESP_OK) s_saver = on;
+    return err;
+}
+
+bool settings_get_barge_in(void) { return s_barge; }
+esp_err_t settings_set_barge_in(bool on)
+{
+    esp_err_t err = save_u8("barge", on);
+    if (err == ESP_OK) s_barge = on;
+    return err;
+}
+bool settings_get_proactive(void) { return s_proactive; }
+esp_err_t settings_set_proactive(bool on)
+{
+    esp_err_t err = save_u8("proactive", on);
+    if (err == ESP_OK) s_proactive = on;
     return err;
 }

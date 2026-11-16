@@ -40,6 +40,7 @@ typedef struct {
     cJSON *tools;                    // [{functionDeclarations: [...]}] or NULL; consumed
     bool google_search;
     bool transcription;              // ask for input/output transcripts
+    bool proactive_audio;            // let the model stay silent for speech not meant for it
 } gemini_setup_t;
 
 /** The setup message (caller frees). Takes ownership of s->tools and sets it to NULL. */
@@ -103,3 +104,12 @@ typedef struct {
 
 void gemini_transcript_reset(gemini_transcript_t *t);
 void gemini_transcript_append(char *buf, const char *text);   // truncates at the limit
+/** Keep only the last `keep` characters (for a rolling "what Gemini said recently"). */
+void gemini_transcript_keep_tail(char *buf, size_t keep);
+
+/**
+ * Echo check for interruptions: does what Gemini "heard" (`heard`, the input transcript)
+ * look like its own recent words (`said`) coming back through the microphones?
+ * True when at least 3 words were heard and most of them appear in `said`.
+ */
+bool gemini_looks_like_echo(const char *heard, const char *said);

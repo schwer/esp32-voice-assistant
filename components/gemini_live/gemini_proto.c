@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +97,11 @@ char *gemini_build_setup(gemini_setup_t *s)
     if (s->transcription) {
         cJSON_AddObjectToObject(setup, "inputAudioTranscription");
         cJSON_AddObjectToObject(setup, "outputAudioTranscription");
+    }
+    if (s->proactive_audio) {
+        // Native-audio models can then ignore background talk, TV and people not
+        // addressing the assistant, and only answer when spoken to.
+        cJSON_AddBoolToObject(cJSON_AddObjectToObject(setup, "proactivity"), "proactiveAudio", true);
     }
     // Keep long conversations affordable: older turns slide out of the context.
     cJSON_AddObjectToObject(cJSON_AddObjectToObject(setup, "contextWindowCompression"), "slidingWindow");
@@ -251,4 +257,49 @@ void gemini_transcript_append(char *buf, const char *text)
     if (l > room) l = room;
     memcpy(buf + n, text, l);
     buf[n + l] = 0;
+}
+
+void gemini_transcript_keep_tail(char *buf, size_t keep)
+{
+    size_t n = strlen(buf);
+    if (n > keep) memmove(buf, buf + n - keep, keep + 1);
+}
+
+/** Next lowercase word (letters/digits/apostrophes) from *p into w; false at the end. */
+static bool next_word(const char **p, char *w, size_t cap)
+{
+    const char *s = *p;
+    while (*s && !isalnum((unsigned char)*s)) s++;
+    if (!*s) { *p = s; return false; }
+    size_t n = 0;
+    while (*s && (isalnum((unsigned char)*s) || *s == '\'')) {
+        if (n + 1 < cap) w[n++] = (char)tolower((unsigned char)*s);
+        s++;
+    }
+    w[n] = 0;
+    *p = s;
+    return true;
+}
+
+static bool contains_word(const char *text, const char *word)
+{
+    char w[48];
+    const char *p = text;
+    while (next_word(&p, w, sizeof(w))) {
+        if (strcmp(w, word) == 0) return true;
+    }
+    return false;
+}
+
+bool gemini_looks_like_echo(const char *heard, const char *said)
+{
+    if (!heard || !said || !said[0]) return false;
+    char w[48];
+    const char *p = heard;
+    int words = 0, found = 0;
+    while (next_word(&p, w, sizeof(w))) {
+        words++;
+        if (contains_word(said, w)) found++;
+    }
+    return words >= 3 && found * 10 >= words * 7;     // 70% of the heard words were just said
 }

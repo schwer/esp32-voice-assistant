@@ -301,6 +301,17 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini API key</em> "
               "on the diagnostics page to check it.</p>");
 
+    SEND(req, "<label class=check><input type=checkbox name=barge value=1");
+    if (settings_get_barge_in()) SEND(req, " checked");
+    SEND(req, "> Let me interrupt him</label>"
+              "<p class=note>Start talking while he's answering and he stops to listen. If he keeps cutting "
+              "himself off, the board's echo cancellation needs adjusting: it then pauses interruptions by itself.</p>");
+    SEND(req, "<label class=check><input type=checkbox name=proactive value=1");
+    if (settings_get_proactive()) SEND(req, " checked");
+    SEND(req, "> Only answer when spoken to</label>"
+              "<p class=note>He ignores the TV, background noise and people talking to each other. "
+              "Turns itself off if the selected model doesn't support it.</p>");
+
     SEND(req, "<label class=check><input type=checkbox name=saver value=1");
     if (settings_get_battery_saver()) SEND(req, " checked");
     SEND(req, "> Battery saver</label>"
@@ -391,6 +402,10 @@ static esp_err_t post_save(httpd_req_t *req)
         err |= settings_set_search(search);
         bool saver = form_field(body, "saver", val, sizeof(val)) && strcmp(val, "1") == 0;
         err |= settings_set_battery_saver(saver);
+        bool barge = form_field(body, "barge", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_barge_in(barge);
+        bool proactive = form_field(body, "proactive", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_proactive(proactive);
     }
     memset(body, 0, sizeof(body));
     memset(val, 0, sizeof(val));

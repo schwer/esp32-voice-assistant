@@ -155,6 +155,42 @@ static void setup_without_tools_or_transcripts_omits_them(void)
     free(json);
 }
 
+static void proactive_audio_is_requested_only_when_enabled(void)
+{
+    gemini_setup_t on = { .model = "m", .voice = "v", .proactive_audio = true };
+    char *json = gemini_build_setup(&on);
+    cJSON *m = parse(json);
+    CHECK(cJSON_IsTrue(at(m, "setup.proactivity.proactiveAudio")));
+    cJSON_Delete(m);
+    free(json);
+    gemini_setup_t off = { .model = "m", .voice = "v" };
+    json = gemini_build_setup(&off);
+    m = parse(json);
+    CHECK(at(m, "setup.proactivity") == NULL);
+    cJSON_Delete(m);
+    free(json);
+}
+
+static void echo_detection(void)
+{
+    const char *said = "Tomorrow will be sunny and mild, with a high of 64 degrees.";
+    // Gemini's own words coming back through the mics (transcribed slightly differently).
+    CHECK(gemini_looks_like_echo("sunny and mild with a high", said));
+    CHECK(gemini_looks_like_echo("Tomorrow will be SUNNY", said));
+    // The user really interrupting.
+    CHECK(!gemini_looks_like_echo("stop, what about Saturday?", said));
+    CHECK(!gemini_looks_like_echo("no wait I meant Paris", said));
+    // Too little to judge, or nothing said yet.
+    CHECK(!gemini_looks_like_echo("sunny", said));
+    CHECK(!gemini_looks_like_echo("will be sunny and mild", ""));
+    CHECK(!gemini_looks_like_echo(NULL, said));
+    // Rolling buffer keeps only the most recent words.
+    char buf[GEMINI_TRANSCRIPT_MAX] = "old words here. ";
+    gemini_transcript_append(buf, "newest part");
+    gemini_transcript_keep_tail(buf, 11);
+    CHECK(strcmp(buf, "newest part") == 0);
+}
+
 static void audio_message_carries_16khz_pcm(void)
 {
     int16_t pcm[1600];
@@ -315,6 +351,8 @@ int main(void)
     RUN(base64_rejects_garbage_and_overflow);
     RUN(setup_message_matches_the_live_api);
     RUN(setup_without_tools_or_transcripts_omits_them);
+    RUN(proactive_audio_is_requested_only_when_enabled);
+    RUN(echo_detection);
     RUN(audio_message_carries_16khz_pcm);
     RUN(text_turn_and_tool_response_shapes);
     RUN(replay_weather_conversation);

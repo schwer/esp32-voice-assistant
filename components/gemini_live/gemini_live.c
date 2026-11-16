@@ -58,9 +58,12 @@ static size_t s_rx_cap;
 static gemini_scratch_t s_scratch;                  // audio decode buffer
 static volatile bool s_turn_done;                   // turnComplete seen, waiting for playback to end
 static gemini_transcript_t s_transcript;
+static char s_said[GEMINI_TRANSCRIPT_MAX];          // what Gemini said recently (echo check)
+static volatile bool s_echo;                        // heard itself: no barge-in for this session
 static cJSON *s_tool_msg;                           // toolResponse being assembled
 
 const char *gemini_live_last_error(void) { return s_error; }
+bool gemini_live_echo_detected(void) { return s_echo; }
 bool gemini_live_ready(void) { return s_ready; }
 
 static void set_state(gemini_state_t st)
@@ -101,9 +104,9 @@ esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t samples, bool speech
     if (!s_active || !s_lock) return ESP_ERR_INVALID_STATE;
     if (speech) touch();
 
-    // Half duplex unless barge-in is enabled: don't send what the speaker is
-    // playing back into the mics (Gemini would interrupt itself).
-    if (!s_cfg.barge_in && audio_is_playing()) {
+    // While Gemini talks, the mic only stays open when interruptions are on and the
+    // echo canceller is doing its job (otherwise Gemini would interrupt itself).
+    if ((!s_cfg.barge_in || s_echo) && audio_is_playing()) {
         return ESP_OK;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -138,13 +141,16 @@ static void send_setup(void)
         .system_instruction = s_system,
         .tools = s_cfg.tools,
         .google_search = s_cfg.google_search,
-        .transcription = s_cfg.on_transcript != NULL,
+        // Transcripts also feed the echo check, so ask for them whenever barge-in is on.
+        .transcription = s_cfg.on_transcript != NULL || s_cfg.barge_in,
+        .proactive_audio = s_cfg.proactive_audio,
     };
     s_cfg.tools = NULL;                              // consumed by gemini_build_setup
     char *json = gemini_build_setup(&setup);
     if (json) {
-        ESP_LOGI(TAG, "setup: model %s, voice %s, search %s (%u bytes)", s_cfg.model, s_cfg.voice,
-                 s_cfg.google_search ? "on" : "off", (unsigned)strlen(json));
+        ESP_LOGI(TAG, "setup: model %s, voice %s, search %s, interruptions %s, only-when-spoken-to %s (%u bytes)",
+                 s_cfg.model, s_cfg.voice, s_cfg.google_search ? "on" : "off", s_cfg.barge_in ? "on" : "off",
+                 s_cfg.proactive_audio ? "on" : "off", (unsigned)strlen(json));
         send_json(json, strlen(json));
         free(json);
     }
@@ -201,8 +207,24 @@ static void h_audio(const int16_t *pcm, size_t samples, void *ctx)
     touch();
 }
 
-static void h_input_transcript(const char *t, void *ctx)  { gemini_transcript_append(s_transcript.user, t); }
-static void h_output_transcript(const char *t, void *ctx) { gemini_transcript_append(s_transcript.assistant, t); }
+static void h_input_transcript(const char *t, void *ctx)
+{
+    gemini_transcript_append(s_transcript.user, t);
+    // Echo guard: if what Gemini "heard" is mostly what it just said, the speaker is
+    // leaking into the mics. Keep the mic closed while it talks for the rest of the session.
+    if (s_cfg.barge_in && !s_echo && gemini_looks_like_echo(s_transcript.user, s_said)) {
+        s_echo = true;
+        ESP_LOGW(TAG, "Gemini heard its own voice; interruptions off for this conversation "
+                      "(echo cancellation isn't working: check the microphone channel layout)");
+    }
+}
+
+static void h_output_transcript(const char *t, void *ctx)
+{
+    gemini_transcript_append(s_transcript.assistant, t);
+    gemini_transcript_append(s_said, t);
+    gemini_transcript_keep_tail(s_said, 600);
+}
 
 static void h_interrupted(void *ctx)
 {
@@ -369,6 +391,8 @@ esp_err_t gemini_live_start(const gemini_live_config_t *cfg)
     s_send_len = 0;
     if (!cfg->keep_buffered_audio) s_preroll_len = 0;
     gemini_transcript_reset(&s_transcript);
+    s_said[0] = 0;
+    s_echo = false;
     s_state = (gemini_state_t)-1;
     touch();
 

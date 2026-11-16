@@ -12,7 +12,10 @@ There's no phone app and no cloud backend of your own.
 
 ## Features
 
-- Natural voice conversation with barge-in (server-side VAD)
+- Natural voice conversation; **interrupt him** by just talking (with an echo guard that pauses
+  interruptions if he starts hearing himself)
+- **Only answers when spoken to**: ignores the TV, background noise and people talking to each
+  other (Gemini proactive audio, turned off automatically if the model doesn't support it)
 - Echo cancellation via Espressif AFE
 - **On-device memory**: appointments and notes stored on flash, exposed to the model as tools
 - Spoken reminders, triggered by the device itself

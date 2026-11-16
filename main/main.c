@@ -28,11 +28,7 @@
 
 static const char *TAG = "main";
 
-#ifdef CONFIG_VA_BARGE_IN
-#define BARGE_IN true
-#else
-#define BARGE_IN false
-#endif
+
 
 typedef enum { EV_WAKE, EV_SESSION_ENDED, EV_SESSION_FAILED, EV_END_REQUESTED } app_event_t;
 static QueueHandle_t s_events;
@@ -51,19 +47,25 @@ static void post(app_event_t ev)
     xQueueSend(s_events, &ev, 0);
 }
 
-static volatile bool s_search_on, s_search_retry;
+// Optional session features some models reject. If the setup fails, retry without
+// proactive audio, then also without search; remember what had to be dropped.
+static volatile int s_retry_stage;              // 0 = first try, 1 = no proactive, 2 = neither
+static volatile bool s_try_search, s_try_proactive;
 
 static void on_gemini_state(gemini_state_t st, void *ctx)
 {
     switch (st) {
     case GEMINI_STATE_CONNECTING:     leds_set(LEDS_CONNECTING); break;
     case GEMINI_STATE_READY:
-        if (s_search_retry) {
-            // Worked without search, so search was the problem: leave it off from now on.
-            ESP_LOGW(TAG, "Google Search isn't supported with this model; turned it off");
+        if (s_retry_stage == 1) {
+            ESP_LOGW(TAG, "'only answer when spoken to' isn't supported by this model; turned it off");
+            settings_set_proactive(false);
+        } else if (s_retry_stage == 2) {
+            ESP_LOGW(TAG, "this model rejects Google Search (and proactive audio) here; turned them off");
             settings_set_search(false);
-            s_search_retry = false;
+            settings_set_proactive(false);
         }
+        s_retry_stage = 0;
         leds_set(LEDS_LISTENING);                                      // ready for your voice
         break;
     case GEMINI_STATE_MODEL_SPEAKING: leds_set(LEDS_SPEAKING);   break;
@@ -79,7 +81,7 @@ static void on_transcript(const char *role, const char *text, void *ctx)
 }
 
 /** System instruction for each conversation: persona, today's date, tool guidance, memory. */
-static char *build_instruction(bool google_search)
+static char *build_instruction(bool google_search, bool proactive)
 {
     char now[64] = "unknown";
     time_t t = time(NULL);
@@ -100,10 +102,16 @@ static char *build_instruction(bool google_search)
             "Current local date and time: %s (time zone %s).\n"
             "When the user says goodbye, thanks you to finish, or says they're done, say a very "
             "short goodbye and then call end_conversation.\n"
+            "%s"
             "The user's home location is %s.\n"
             "%s"
             "%s%s%s",
             settings_get_name(), now, settings_get_tz(),
+            proactive ? "Only speak when the user is talking to you. If you hear background noise, a TV "
+                        "or radio, or people talking to each other, stay silent. After you answer, stop "
+                        "and wait: don't add follow-up questions or keep talking unless you need more "
+                        "information to help. If the user starts talking while you speak, stop and listen.\n"
+                      : "",
             settings_get_location()[0] ? settings_get_location() : "not set",
             google_search ? "Use Google Search for current information such as news, sports, "
                             "opening hours, prices and facts you're unsure about.\n" : "",
@@ -254,6 +262,11 @@ static bool device_free(void)
     return wakeword_is_idle();                         // not in a conversation or self-test
 }
 
+// Interruptions are paused until reboot if Gemini keeps hearing itself (echo
+// cancellation not working), so every conversation doesn't start with a glitch.
+static int s_echo_count;
+static bool s_echo_this_boot;
+
 /**
  * Battery saver: on battery, turn Wi-Fi off after a few quiet minutes; turn it back
  * on when the board is plugged in or the saver is switched off ("Jarvis" also does).
@@ -289,11 +302,11 @@ static bool battery_saver(void)
 }
 
 /** Open a Gemini Live session for this conversation. */
-static esp_err_t start_session(bool google_search, bool retry)
+static esp_err_t start_session(bool google_search, bool proactive, bool retry)
 {
     char key[SETTINGS_API_KEY_MAX];
     settings_get_api_key(key, sizeof(key));
-    char *instruction = build_instruction(google_search);
+    char *instruction = build_instruction(google_search, proactive);
     gemini_live_config_t cfg = {
         .api_key = key,
         .model = settings_get_model(),
@@ -304,11 +317,13 @@ static esp_err_t start_session(bool google_search, bool retry)
         .on_state = on_gemini_state,
         .on_transcript = on_transcript,
         .idle_timeout_s = CONFIG_VA_IDLE_TIMEOUT_S,
-        .barge_in = BARGE_IN,
+        .barge_in = settings_get_barge_in() && !s_echo_this_boot,
+        .proactive_audio = proactive,
         .google_search = google_search,
         .keep_buffered_audio = retry,
     };
-    s_search_on = google_search;
+    s_try_search = google_search;
+    s_try_proactive = proactive;
     esp_err_t err = gemini_live_start(&cfg);
     memset(key, 0, sizeof(key));
     free(instruction);
@@ -454,7 +469,7 @@ void app_main(void)
                 voicepack_abort();                     // the user comes first; it resumes later
                 for (int i = 0; i < 60 && voicepack_busy(); i++) vTaskDelay(pdMS_TO_TICKS(50));
             }
-            s_search_retry = false;
+            s_retry_stage = 0;
             wakeword_converse();                       // stop wake detection while we talk
             prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
             leds_set(LEDS_CONNECTING);
@@ -477,7 +492,7 @@ void app_main(void)
                 break;
             }
             conversations_session_begin();             // audio now flows to Gemini (buffered)
-            if (start_session(settings_get_search(), false) != ESP_OK) {
+            if (start_session(settings_get_search(), settings_get_proactive(), false) != ESP_OK) {
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 back_to_listening();
             }
@@ -487,6 +502,18 @@ void app_main(void)
             audio_wait_idle(15000);                    // let the goodbye finish
             /* fall through */
         case EV_SESSION_ENDED:
+            if (gemini_live_echo_detected()) {
+                if (++s_echo_count >= 2 && !s_echo_this_boot) {
+                    s_echo_this_boot = true;
+                    diag_set_status("interruptions", "paused until restart: Gemini heard its own voice in two "
+                                    "conversations (echo cancellation isn't working; check Microphone levels)");
+                } else {
+                    diag_set_status("interruptions", "paused for one conversation: Gemini heard its own voice");
+                }
+            } else if (!s_echo_this_boot) {
+                s_echo_count = 0;                      // only consecutive echoes count
+                diag_set_status("interruptions", settings_get_barge_in() ? "on" : "off (setup page)");
+            }
             gemini_live_stop();
             diag_set_status("gemini", "idle (last conversation ended normally)");
             ESP_LOGI(TAG, "conversation ended");
@@ -497,13 +524,19 @@ void app_main(void)
             snprintf(why, sizeof(why), "failed: %s", gemini_live_last_error());
             diag_set_status("gemini", why);
             gemini_live_stop();
-            if (s_search_on && !s_search_retry) {
-                // Some Live models reject Google Search next to custom tools: try once
-                // without it, resending the speech buffered by the failed attempt.
-                ESP_LOGW(TAG, "retrying without Google Search");
-                s_search_retry = true;
-                if (start_session(false, true) == ESP_OK) break;
+            // Some models reject optional features in the setup: retry without them,
+            // resending the speech buffered by the failed attempt.
+            if (s_retry_stage == 0 && s_try_proactive) {
+                ESP_LOGW(TAG, "retrying without 'only answer when spoken to'");
+                s_retry_stage = 1;
+                if (start_session(s_try_search, false, true) == ESP_OK) break;
             }
+            if (s_retry_stage <= 1 && s_try_search) {
+                ESP_LOGW(TAG, "retrying without Google Search");
+                s_retry_stage = 2;
+                if (start_session(false, false, true) == ESP_OK) break;
+            }
+            s_retry_stage = 0;
             set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
             back_to_listening();
             break;

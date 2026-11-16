@@ -35,7 +35,8 @@ typedef struct {
     gemini_transcript_cb_t on_transcript;
     void *ctx;
     int idle_timeout_s;                  // end after this much silence from both sides
-    bool barge_in;                       // keep the mic open while Gemini talks (needs working AEC)
+    bool barge_in;                       // let the user interrupt: keep the mic open while Gemini talks
+    bool proactive_audio;                // only answer speech meant for the assistant
     bool google_search;                  // add Google Search grounding next to our function tools
     bool keep_buffered_audio;            // retry: resend speech buffered by the previous attempt
     /** If set, Gemini's audio (24 kHz mono) goes here instead of the speaker. */
@@ -53,5 +54,10 @@ esp_err_t gemini_live_send_audio(const int16_t *pcm, size_t samples, bool speech
 bool gemini_live_ready(void);
 /** Send a text turn (e.g. a line to read aloud). */
 esp_err_t gemini_live_send_text(const char *text);
+/**
+ * True if, during this session, Gemini heard its own voice through the microphones
+ * (echo cancellation not working); interruptions were then switched off for the session.
+ */
+bool gemini_live_echo_detected(void);
 /** Human-readable reason for the last error, e.g. "API key not valid". */
 const char *gemini_live_last_error(void);

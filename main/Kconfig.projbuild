@@ -51,13 +51,6 @@ menu "Voice Assistant"
         help
             Closes the Gemini session to save tokens.
 
-    config VA_BARGE_IN
-        bool "Let the user interrupt the assistant while it talks"
-        default n
-        help
-            Keeps the microphones streaming while Gemini speaks. Needs working
-            echo cancellation (correct AFE input layout); otherwise Gemini hears
-            itself and keeps interrupting. Off = the mic pauses while it talks.
 
 
 endmenu
