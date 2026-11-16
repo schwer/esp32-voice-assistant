@@ -400,10 +400,6 @@ void app_main(void)
         leds_set(LEDS_LISTENING);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    leds_set(idle_state());                    // amber blink explains itself out loud
-    if (idle_state() == LEDS_OFF) {
-        prompts_say(PROMPT_READY);
-    }
     bool was_online = online;
     bool wifi_expected = true;                 // false while Wi-Fi is off on purpose
     s_last_activity_us = esp_timer_get_time();
@@ -437,6 +433,15 @@ void app_main(void)
         diag_set_status("wake word", "listening for \"Jarvis\"");
     }
     diag_set_status("gemini", "idle");
+
+    // Speak only now that start-up is over. Mounting storage and loading the wake word
+    // models read a lot of flash, which stalls playback (the start-up message stuttered).
+    // Also, by now the message is in the selected Gemini voice, not the built-in one.
+    vTaskDelay(pdMS_TO_TICKS(300));            // let the microphone pipeline settle
+    leds_set(idle_state());                    // amber blink explains itself out loud
+    if (idle_state() == LEDS_OFF) {
+        prompts_say(PROMPT_READY);
+    }
 
     for (;;) {
         app_event_t ev;
