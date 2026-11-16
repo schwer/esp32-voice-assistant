@@ -23,6 +23,7 @@
 #include "prompts.h"
 #include "battery.h"
 #include "voicepack.h"
+#include "clock.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -30,12 +31,18 @@ static const char *TAG = "main";
 
 
 
-typedef enum { EV_WAKE, EV_SESSION_ENDED, EV_SESSION_FAILED, EV_END_REQUESTED } app_event_t;
+typedef enum { EV_WAKE, EV_SESSION_ENDED, EV_SESSION_FAILED, EV_END_REQUESTED,
+               EV_RING_START, EV_RING_STOP } app_event_t;
 static QueueHandle_t s_events;
+static volatile bool s_in_conversation;
 
 static void on_wake(void *ctx)
 {
     leds_event(LEDS_EVENT_WAKE);
+    if (clock_ringing()) {                     // "Jarvis" silences a timer or alarm
+        clock_stop_ringing();
+        return;
+    }
     app_event_t ev = EV_WAKE;
     xQueueSend(s_events, &ev, 0);
 }
@@ -188,9 +195,17 @@ static void back_to_listening(void)
     audio_wait_idle(10000);
     net_power_save(true);                      // radio dozes while idle
     s_last_activity_us = esp_timer_get_time();
+    s_in_conversation = false;
     leds_state_t cur = leds_get();
-    if (cur != LEDS_ERROR) leds_set(idle_state());
+    if (clock_ringing()) leds_set(LEDS_REMINDER);
+    else if (cur != LEDS_ERROR) leds_set(idle_state());
     wakeword_listen();
+}
+
+/** A timer or alarm started (true) or stopped (false) ringing. Runs on the clock task. */
+static void on_ring(bool ringing, clock_ring_t kind, const char *label)
+{
+    post(ringing ? EV_RING_START : EV_RING_STOP);
 }
 
 static void on_audio(const int16_t *pcm, size_t samples, bool speech, void *ctx)
@@ -259,7 +274,7 @@ static void check_voicepack(void)
 
 static bool device_free(void)
 {
-    return wakeword_is_idle();                         // not in a conversation or self-test
+    return wakeword_is_idle() && !clock_ringing();     // not in a conversation, self-test or alarm
 }
 
 // Interruptions are paused until reboot if Gemini keeps hearing itself (echo
@@ -335,7 +350,7 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
     diag_init();                               // capture logs for the diagnostics page
-    s_events = xQueueCreate(4, sizeof(app_event_t));
+    s_events = xQueueCreate(8, sizeof(app_event_t));
 
     ESP_ERROR_CHECK(settings_init());
     if (leds_init() == ESP_OK) {
@@ -403,6 +418,7 @@ void app_main(void)
         diag_set_status("storage", "mount failed");
     }
     ESP_ERROR_CHECK(appointments_init());
+    clock_init(on_ring);                       // timers, alarms (saved on flash), stopwatch
 
     // Wake word needs the microphones.
     wakeword_config_t wcfg = { .on_wake = on_wake, .on_audio = on_audio };
@@ -463,13 +479,30 @@ void app_main(void)
             continue;
         }
         switch (ev) {
+        case EV_RING_START:
+            if (s_in_conversation) {                   // the alarm wins; the conversation ends
+                ESP_LOGI(TAG, "ending the conversation: a timer or alarm went off");
+                gemini_live_stop();
+                back_to_listening();
+            }
+            s_last_activity_us = esp_timer_get_time();
+            wakeword_allow_while_playing(true);        // "Jarvis" over the beeps stops it
+            leds_set(LEDS_REMINDER);
+            break;
+        case EV_RING_STOP:
+            wakeword_allow_while_playing(false);
+            s_last_activity_us = esp_timer_get_time();
+            if (leds_get() == LEDS_REMINDER) leds_set(idle_state());
+            break;
         case EV_WAKE: {
+            if (clock_ringing()) break;                // that "Jarvis" stopped the ringing
             ESP_LOGI(TAG, "wake: starting conversation");
             if (voicepack_busy()) {
                 voicepack_abort();                     // the user comes first; it resumes later
                 for (int i = 0; i < 60 && voicepack_busy(); i++) vTaskDelay(pdMS_TO_TICKS(50));
             }
             s_retry_stage = 0;
+            s_in_conversation = true;
             wakeword_converse();                       // stop wake detection while we talk
             prompts_wake_ack();                        // "Yes?" / "I'm listening." / "How can I help?"
             leds_set(LEDS_CONNECTING);

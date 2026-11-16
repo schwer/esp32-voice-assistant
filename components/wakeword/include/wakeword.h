@@ -37,3 +37,5 @@ void wakeword_converse(void);
 int wakeword_capture(int16_t *buf, size_t max_samples, int timeout_ms);
 /** True while listening for "Jarvis" (not in a conversation or test). */
 bool wakeword_is_idle(void);
+/** Accept "Jarvis" even while the speaker plays (beeps don't sound like it; used to stop alarms). */
+void wakeword_allow_while_playing(bool allow);

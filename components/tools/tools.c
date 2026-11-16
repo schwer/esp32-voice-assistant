@@ -8,6 +8,7 @@
 #include "weather.h"
 #include "battery.h"
 #include "settings.h"
+#include "clock.h"
 
 static const char *TAG = "tools";
 
@@ -97,6 +98,7 @@ cJSON *tools_declarations(void)
 
     cJSON *tools = cJSON_CreateArray();
     cJSON *t = cJSON_CreateObject();
+    clock_tool_declarations(decls);
     cJSON_AddItemToObject(t, "functionDeclarations", decls);
     cJSON_AddItemToArray(tools, t);
     return tools;
@@ -122,7 +124,17 @@ const char *tools_system_instruction(void)
         "and, if known, whether you're charging and roughly how long you'll last. Be honest that "
         "health is an estimate from voltage.\n"
         "Weather: use get_weather. Without a place it uses the user's home location. Give the "
-        "temperature as a whole number and mention rain or snow chances only when relevant.\n";
+        "temperature as a whole number and mention rain or snow chances only when relevant.\n"
+        "Timers, alarms and stopwatch: these run on the board itself.\n"
+        "- set_timer takes seconds: convert spoken durations (\"ten minutes\" = 600). Give a label "
+        "only if the user named one.\n"
+        "- set_alarm takes 24-hour local time. If the user didn't say AM or PM and it's unclear "
+        "from context, ask. Use repeat for \"every day\", \"weekdays\" or \"weekends\", and date "
+        "only for a one-off alarm on a day other than the next occurrence.\n"
+        "- Confirm in one short sentence using the time and day the tool returns (say times the "
+        "way people speak, e.g. \"7:30 tomorrow morning\"). If the tool returns an error, say it simply.\n"
+        "- For \"how long is left\", use list_timers; for stopwatch questions use stopwatch with "
+        "action status. If several timers or alarms match a cancel request, ask which one.\n";
 }
 
 // ---------- dispatch ----------
@@ -166,7 +178,9 @@ cJSON *tools_handle_call(const char *name, const cJSON *args)
         return conversations_delete(arg_int(args, "id"));
     }
 
-    cJSON *r = cJSON_CreateObject();
+    cJSON *r = clock_tool(name, args);
+    if (r) return r;
+    r = cJSON_CreateObject();
     cJSON_AddStringToObject(r, "error", "unknown tool");
     return r;
 }

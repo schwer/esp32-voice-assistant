@@ -100,3 +100,21 @@ test('messages list: play one, and re-record with a progress bar', async ({ page
   await expect(page.locator('#dvptext')).toHaveText(/Finished/, { timeout: 10000 });
   expect(errors).toEqual([]);
 });
+
+test('alarms & timers card, and Stop ringing', async ({ page }) => {
+  let clock = { ringing: 'timer: pasta', 'timer 1': 'tea, 4:59 left', 'alarm 1': '07:30 weekdays (next Tuesday 07:30)' };
+  const { calls } = await serve(page, DIAG_HTML(), {
+    'GET /diag.json': () => ({ ...snapshot({ level: '50%' }), clock }),
+    'GET /diag/leds.json': () => IDLE, 'GET /diag/messages.json': () => MESSAGES,
+    'POST /diag/stop-ringing': () => { clock = {}; return { ok: true, message: 'Stopped.' }; },
+  });
+  await page.goto('http://dev/diag');
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Alarms & timers' }) });
+  await expect(card).toContainText('tea, 4:59 left');
+  await expect(card).toContainText('07:30 weekdays');
+  await page.click('button[data-act="stop-ringing"]');
+  await expect(page.locator('#result')).toHaveText('Stopped.');
+  expect(calls.find((c) => c.key === 'POST /diag/stop-ringing').headers['x-assistant']).toBe('1');
+  await page.reload();
+  await expect(card).toContainText('No timers, alarms or stopwatch.');
+});

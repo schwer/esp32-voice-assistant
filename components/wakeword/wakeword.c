@@ -17,6 +17,7 @@ static const esp_afe_sr_iface_t *s_afe;
 static esp_afe_sr_data_t *s_data;
 static wakeword_config_t s_cfg;
 static volatile bool s_conversing;
+static volatile bool s_allow_while_playing;   // alarm ringing: "Jarvis" stops it
 
 // Capture (microphone test)
 static struct {
@@ -82,7 +83,7 @@ static void fetch_task(void *arg)
         static TickType_t last_playing;
         if (audio_is_playing()) last_playing = xTaskGetTickCount();
         bool own_voice = xTaskGetTickCount() - last_playing < pdMS_TO_TICKS(600);
-        if (!s_conversing && res->wakeup_state == WAKENET_DETECTED && own_voice) {
+        if (!s_conversing && res->wakeup_state == WAKENET_DETECTED && own_voice && !s_allow_while_playing) {
             ESP_LOGI(TAG, "ignored wake word from our own speaker");
             continue;
         }
@@ -180,3 +181,5 @@ int wakeword_capture(int16_t *buf, size_t max_samples, int timeout_ms)
     s_afe->enable_wakenet(s_data);
     return s_cap.heard ? (int)s_cap.len : 0;
 }
+
+void wakeword_allow_while_playing(bool allow) { s_allow_while_playing = allow; }

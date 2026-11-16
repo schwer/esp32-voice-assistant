@@ -27,6 +27,7 @@
 #include "audio.h"
 #include "selftest.h"
 #include "voicepack.h"
+#include "clock.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -465,7 +466,9 @@ static esp_err_t get_diag(httpd_req_t *req)
 static esp_err_t get_diag_json(httpd_req_t *req)
 {
     s_last_activity_us = esp_timer_get_time();
-    return send_json(req, diag_snapshot());
+    cJSON *d = diag_snapshot();
+    cJSON_AddItemToObject(d, "clock", clock_snapshot());
+    return send_json(req, d);
 }
 
 static esp_err_t get_diag_logs(httpd_req_t *req)
@@ -532,6 +535,17 @@ static esp_err_t post_speaker_test(httpd_req_t *req)
     cJSON_AddBoolToObject(r, "ok", true);
     cJSON_AddStringToObject(r, "message",
         "Playing a test message. If you hear nothing, check the Speaker line under Modules.");
+    return send_json(req, r);
+}
+
+static esp_err_t post_stop_ringing(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    bool was = clock_ringing();
+    clock_stop_ringing();
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    cJSON_AddStringToObject(r, "message", was ? "Stopped." : "Nothing is ringing.");
     return send_json(req, r);
 }
 
@@ -705,6 +719,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },
         { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
+        { .uri = "/diag/stop-ringing",.method = HTTP_POST, .handler = post_stop_ringing },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
         { .uri = "/diag/voice-record",.method = HTTP_POST, .handler = post_voice_rerecord },

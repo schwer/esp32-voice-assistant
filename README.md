@@ -20,6 +20,10 @@ There's no phone app and no cloud backend of your own.
 - **On-device memory**: appointments and notes stored on flash, exposed to the model as tools
 - Spoken reminders, triggered by the device itself
 - **Battery questions** ("How's your battery?", "Are you charging?", "How long will you last?")
+- **Timers, alarms and a stopwatch**, kept on the board so they work offline: "set a pasta timer
+  for 10 minutes", "wake me at 7:30 on weekdays", "start the stopwatch", "how long is left?".
+  When one goes off the board says so, beeps and pulses amber; say "Jarvis" (or press Stop
+  ringing on the diagnostics page) to silence it. Alarms survive restarts; timers don't.
 - **Weather** from Open-Meteo (free, no key) for your home location or anywhere you name
 - **Google Search** grounding for current information (when the model supports it)
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
@@ -116,7 +120,7 @@ CI (`.github/workflows/test.yml`) runs on every push and pull request:
 
 | Suite | What it covers | Run locally |
 |---|---|---|
-| Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers, and Gemini Live messages: what the firmware sends, plus whole server conversations replayed from `tests/host/fixtures/gemini` (hand-written in the API's message shapes; no API key needed). Built with AddressSanitizer + UBSan. | `make -C tests/host` |
+| Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers, alarm scheduling (repeats, daylight saving) and stopwatch, and Gemini Live messages: what the firmware sends, plus whole server conversations replayed from `tests/host/fixtures/gemini` (hand-written in the API's message shapes; no API key needed). Built with AddressSanitizer + UBSan. | `make -C tests/host` |
 | Tool checks (Python) | Firmware parts never overlap NVS, manifest format, partition table, phrase list / enum / clips stay in sync | `python -m pytest tests/tools` |
 | Browser tests (Playwright) | Installer against a simulated board (Improv over Web Serial), diagnostics page, setup page's recording progress | `cd tests/web && npm ci && npx playwright install chromium && npx playwright test` |
 
@@ -126,7 +130,7 @@ battery readings) still needs a board: use the diagnostics page's tests.
 Hardware-independent code lives in modules without ESP-IDF dependencies so it can be tested
 on a normal computer: `components/dsp`, `components/battery/battery_est.c`,
 `components/improv/improv_proto.c`, `components/setup_web/web_util.c`,
-`components/gemini_live/gemini_proto.c`.
+`components/gemini_live/gemini_proto.c`, `components/clock/clock_logic.c`.
 
 ## Security notes
 
