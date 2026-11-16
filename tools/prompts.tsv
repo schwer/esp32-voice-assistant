@@ -20,3 +20,5 @@ mic_test_hello	Hello! I heard you. Here's what you said.
 mic_test_nothing	I didn't hear anything. Check the microphone levels on the diagnostics page.
 battery_low	My battery is at ten percent. Please charge me soon.
 battery_critical	My battery is almost empty. I'll turn off soon unless you charge me.
+timer_done	Your timer is done.
+alarm_ringing	Your alarm is going off.
