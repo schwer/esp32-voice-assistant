@@ -31,3 +31,7 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=3072
 CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+# Network sockets. The default (10) is exactly what the web server can hold open by
+# itself, so with the setup/diagnostics page open Gemini couldn't connect (errno 23).
+CONFIG_LWIP_MAX_SOCKETS=20

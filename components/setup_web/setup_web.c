@@ -701,7 +701,8 @@ esp_err_t setup_web_start(void)
     }
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 10240;              // the API key test does a TLS handshake here
-    cfg.lru_purge_enable = true;
+    cfg.lru_purge_enable = true;         // a new browser connection closes the oldest idle one
+    cfg.max_open_sockets = 5;            // leave sockets for Gemini, weather, time and mDNS
     cfg.max_uri_handlers = 24;
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
