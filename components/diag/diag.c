@@ -18,6 +18,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "settings.h"
+#include "net.h"
 #include "storage.h"
 #include "conversations.h"
 #include "audio.h"
@@ -169,6 +170,10 @@ cJSON *diag_snapshot(void)
     cJSON_AddNumberToObject(mem, "psram_total_kb", heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / 1024);
     cJSON_AddNumberToObject(mem, "psram_free_kb", heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
     cJSON_AddNumberToObject(mem, "psram_min_free_kb", heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    int smax, sn = net_sockets_in_use(&smax);
+    char socks[24];
+    snprintf(socks, sizeof(socks), "%d of %d", sn, smax);
+    cJSON_AddStringToObject(mem, "network_sockets_in_use", socks);
 
     // Wi-Fi
     cJSON *wifi = add_obj(root, "wifi");

@@ -11,6 +11,9 @@
 #include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "freertos/task.h"
+#include <fcntl.h>
+#include "lwip/sockets.h"
+#include "sdkconfig.h"
 #include "net.h"
 
 static const char *TAG = "net";
@@ -318,4 +321,14 @@ void net_saved_ssid(char *buf, size_t len)
 void net_power_save(bool idle)
 {
     if (s_started) esp_wifi_set_ps(idle ? WIFI_PS_MAX_MODEM : WIFI_PS_NONE);
+}
+
+int net_sockets_in_use(int *max)
+{
+    int n = 0;
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; fd++) {
+        if (fcntl(fd, F_GETFL, 0) >= 0) n++;
+    }
+    if (max) *max = CONFIG_LWIP_MAX_SOCKETS;
+    return n;
 }

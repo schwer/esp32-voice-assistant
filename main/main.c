@@ -558,8 +558,11 @@ void app_main(void)
             back_to_listening();
             break;
         case EV_SESSION_FAILED: {
-            char why[160];
-            snprintf(why, sizeof(why), "failed: %s", gemini_live_last_error());
+            char why[224];
+            int smax, sn = net_sockets_in_use(&smax);
+            snprintf(why, sizeof(why), "failed: %s (network sockets in use: %d of %d)",
+                     gemini_live_last_error(), sn, smax);
+            ESP_LOGW(TAG, "Gemini %s", why);
             diag_set_status("gemini", why);
             gemini_live_stop();
             // Some models reject optional features in the setup: retry without them,

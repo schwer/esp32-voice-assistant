@@ -30,5 +30,7 @@ void net_power_save(bool idle);
 const char *net_reason_text(int reason);
 /** Log a one-line plain-language Wi-Fi status (for the serial console). */
 void net_log_status(void);
+/** Network sockets open right now, and the most there can be (diagnostics). */
+int net_sockets_in_use(int *max);
 /** Writes e.g. "http://192.168.1.50/" into buf. */
 esp_err_t net_device_url(char *buf, size_t len);
