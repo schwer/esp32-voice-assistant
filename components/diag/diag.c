@@ -92,7 +92,7 @@ size_t diag_logs(char *buf, size_t len)
 // ---------- module status ----------
 
 #define MAX_STATUS 12
-static struct { char module[16]; char status[48]; } s_status[MAX_STATUS];
+static struct { char module[16]; char status[160]; } s_status[MAX_STATUS];
 static portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 
 void diag_set_status(const char *module, const char *status)
