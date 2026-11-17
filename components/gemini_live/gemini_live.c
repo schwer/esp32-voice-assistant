@@ -238,6 +238,7 @@ static void h_turn_complete(void *ctx)
     flush_transcripts();
     s_turn_done = true;                                 // READY once playback has finished
     touch();
+    audio_stream_end();                                 // short replies needn't wait to buffer
     if (s_cfg.on_turn_complete) s_cfg.on_turn_complete(s_cfg.ctx);
 }
 
@@ -463,6 +464,7 @@ esp_err_t gemini_live_stop(void)
     s_closing = true;
     s_active = false;
     s_ready = false;
+    audio_stream_end();                                 // let anything already received play
     while (s_monitor) vTaskDelay(pdMS_TO_TICKS(20));
     if (s_ws) {
         if (esp_websocket_client_is_connected(s_ws)) {

@@ -24,6 +24,10 @@ static const char *TAG = "audio";
 #define CHUNK_BYTES      1024
 #define PA_IDLE_OFF_MS   1500            // amp off after this much silence (no hiss, saves power)
 #define DEFAULT_VOLUME   70
+// Gemini's speech arrives over Wi-Fi in uneven bursts. Collect up to 1.5 s before speaking
+// (the lights already show he's answering) so a slow patch doesn't make him stutter.
+#define PREBUFFER_MS     1500
+#define PREBUFFER_BYTES  (16000 * 2 * PREBUFFER_MS / 1000)
 
 static i2c_master_bus_handle_t s_i2c;
 static esp_io_expander_handle_t s_expander;
@@ -39,6 +43,7 @@ static float s_level_db[MIC_CHANNELS] = { -96, -96, -96, -96 };
 static StreamBufferHandle_t s_play;
 static volatile bool s_flush;
 static volatile bool s_writing;
+static volatile bool s_streaming;        // Gemini is still sending this reply
 static bool s_pa_on;
 
 i2c_master_bus_handle_t audio_i2c_bus(void) { return s_i2c; }
@@ -62,6 +67,15 @@ static void play_task(void *arg)
         if (s_flush) {
             xStreamBufferReset(s_play);
             s_flush = false;
+        }
+        if (!s_writing && s_streaming && xStreamBufferBytesAvailable(s_play) > 0) {
+            // Starting (or restarting after running dry): build up a cushion first.
+            TickType_t t0 = xTaskGetTickCount();
+            while (s_streaming && !s_flush && xStreamBufferBytesAvailable(s_play) < PREBUFFER_BYTES &&
+                   xTaskGetTickCount() - t0 < pdMS_TO_TICKS(PREBUFFER_MS)) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            if (s_flush) continue;
         }
         size_t n = xStreamBufferReceive(s_play, chunk, CHUNK_BYTES, pdMS_TO_TICKS(100));
         if (n == 0) {
@@ -319,6 +333,7 @@ static int16_t s_rs_out[DSP_RESAMPLE_MAX_OUT(6000)];
 esp_err_t audio_play(const int16_t *pcm, size_t samples)
 {
     if (!s_play) return ESP_ERR_INVALID_STATE;
+    s_streaming = true;
     while (samples) {
         size_t n = samples < 6000 ? samples : 6000;   // bounded output buffer
         size_t out = dsp_resample_24_16(&s_rs, pcm, n, s_rs_out);
@@ -329,8 +344,14 @@ esp_err_t audio_play(const int16_t *pcm, size_t samples)
     return ESP_OK;
 }
 
+void audio_stream_end(void)
+{
+    s_streaming = false;                 // nothing more is coming: play what's buffered now
+}
+
 void audio_flush_playback(void)
 {
+    s_streaming = false;
     s_flush = true;
     dsp_resampler_reset(&s_rs);
 }
