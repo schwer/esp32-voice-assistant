@@ -351,14 +351,14 @@ static esp_err_t get_root(httpd_req_t *req)
               "Add your phone's hotspot to use it away from home.</p>");
     char (*nets)[NET_SSID_MAX] = calloc(NET_MAX_SAVED, NET_SSID_MAX);
     int nn = nets ? net_saved_networks(nets, NET_MAX_SAVED) : 0;
-    char cur[NET_SSID_MAX] = "";
-    net_current_ssid(cur, sizeof(cur));
+    char cur_ssid[NET_SSID_MAX] = "";
+    net_current_ssid(cur_ssid, sizeof(cur_ssid));
     for (int i = 0; i < nn; i++) {
         SEND(req, "<form method=post action=/wifi/forget class=netrow "
                   "style='display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0'>"
                   "<span>");
         send_escaped(req, nets[i]);
-        if (!strcmp(nets[i], cur)) SEND(req, " <small class=ok>(connected)</small>");
+        if (!strcmp(nets[i], cur_ssid)) SEND(req, " <small class=ok>(connected)</small>");
         SEND(req, "</span><input type=hidden name=ssid value=\"");
         send_escaped(req, nets[i]);
         SEND(req, "\"><button type=submit style='margin:0;flex:none'"
