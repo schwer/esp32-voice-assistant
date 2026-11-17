@@ -187,8 +187,8 @@ static void set_trust(bool untrusted)
 {
     if (untrusted == s_untrusted) return;
     s_untrusted = untrusted;
-    ESP_LOGI(TAG, untrusted ? "public network: switching the setup page off"
-                            : "own network: setup page on");
+    ESP_LOGI(TAG, "%s", untrusted ? "public network: switching the setup page off"
+                                  : "own network: setup page on");
     if (s_trust_cb) s_trust_cb(untrusted);
 }
 
