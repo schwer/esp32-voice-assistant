@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_tls_errors.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
@@ -324,9 +325,31 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         if (!s_closing) fail(s_ready ? "connection closed" : "couldn't connect to Gemini");
         break;
 
-    case WEBSOCKET_EVENT_ERROR:
-        if (!s_closing) fail("network error talking to Gemini");
+    case WEBSOCKET_EVENT_ERROR: {
+        if (s_closing) break;
+        // Say which step failed, so the diagnostics page points at the real cause.
+        const esp_websocket_error_codes_t *e = &d->error_handle;
+        char why[128];
+        esp_err_t tls = e->esp_tls_last_esp_err;
+        if (e->esp_ws_handshake_status_code >= 400) {
+            snprintf(why, sizeof(why), "Gemini refused the connection (HTTP %d): check the API key and model",
+                     e->esp_ws_handshake_status_code);
+        } else if (e->esp_transport_sock_errno == 23 || tls == ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET) {
+            snprintf(why, sizeof(why), "out of network sockets (errno %d)", e->esp_transport_sock_errno);
+        } else if (tls == ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME) {
+            snprintf(why, sizeof(why), "couldn't look up Gemini's address (DNS)");
+        } else if (tls == ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT) {
+            snprintf(why, sizeof(why), "connecting to Gemini timed out");
+        } else if (tls != ESP_OK) {
+            snprintf(why, sizeof(why), "secure connection to Gemini failed (%s, errno %d)",
+                     esp_err_to_name(tls), e->esp_transport_sock_errno);
+        } else {
+            snprintf(why, sizeof(why), "network error talking to Gemini (type %d, errno %d)",
+                     (int)e->error_type, e->esp_transport_sock_errno);
+        }
+        fail(why);
         break;
+    }
     }
 }
 
