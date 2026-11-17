@@ -10,6 +10,7 @@
 #include "audio.h"
 #include "wakeword.h"
 #include "gemini_live.h"
+#include "gemini_proto.h"
 #include "tools.h"
 #include "appointments.h"
 #include "setup_web.h"
@@ -565,6 +566,15 @@ void app_main(void)
             ESP_LOGW(TAG, "Gemini %s", why);
             diag_set_status("gemini", why);
             gemini_live_stop();
+            if (gemini_error_is_account(gemini_live_last_error())) {
+                // Out of credit, over quota or a bad key: fewer features won't help.
+                snprintf(why, sizeof(why), "your Gemini account or key: %s", gemini_live_last_error());
+                diag_set_status("gemini", why);
+                s_retry_stage = 0;
+                set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
+                back_to_listening();
+                break;
+            }
             // Some models reject optional features in the setup: retry without them,
             // resending the speech buffered by the failed attempt.
             if (s_retry_stage == 0 && s_try_proactive) {

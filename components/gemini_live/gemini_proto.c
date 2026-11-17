@@ -303,3 +303,26 @@ bool gemini_looks_like_echo(const char *heard, const char *said)
     }
     return words >= 3 && found * 10 >= words * 7;     // 70% of the heard words were just said
 }
+
+static bool contains_nocase(const char *hay, const char *needle)
+{
+    size_t n = strlen(needle);
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < n && hay[i] && tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == n) return true;
+    }
+    return false;
+}
+
+bool gemini_error_is_account(const char *error)
+{
+    static const char *const words[] = { "credit", "quota", "billing", "resource_exhausted", "resource exhausted",
+                                         "api key not valid", "api_key_invalid", "permission_denied",
+                                         "permission denied" };
+    if (!error) return false;
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+        if (contains_nocase(error, words[i])) return true;
+    }
+    return false;
+}

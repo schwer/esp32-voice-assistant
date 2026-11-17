@@ -35,3 +35,8 @@ CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
 # Network sockets. The default (10) is exactly what the web server can hold open by
 # itself, so with the setup/diagnostics page open Gemini couldn't connect (errno 23).
 CONFIG_LWIP_MAX_SOCKETS=20
+
+# Software AES for TLS. Hardware AES needs internal-RAM DMA buffers, and when internal
+# RAM ran short a Gemini connection failed with "esp-aes: Failed to allocate memory".
+# Our traffic (~50 KB/s of audio) is easy work for software AES.
+CONFIG_MBEDTLS_HARDWARE_AES=n

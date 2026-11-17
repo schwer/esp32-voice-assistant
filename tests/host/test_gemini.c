@@ -171,6 +171,20 @@ static void proactive_audio_is_requested_only_when_enabled(void)
     free(json);
 }
 
+static void account_errors_are_recognised(void)
+{
+    CHECK(gemini_error_is_account("Your prepayment credits are depleted. Please go to AI Studio at "
+                                  "https://ai.studio/project (code 1011)"));
+    CHECK(gemini_error_is_account("You exceeded your current quota (code 1011)"));
+    CHECK(gemini_error_is_account("RESOURCE_EXHAUSTED"));
+    CHECK(gemini_error_is_account("API key not valid. Please pass a valid API key. (code 1007)"));
+    CHECK(gemini_error_is_account("Billing account not active"));
+    CHECK(!gemini_error_is_account("Unknown name \"proactivity\" at 'setup': Cannot find field. (code 1007)"));
+    CHECK(!gemini_error_is_account("network error talking to Gemini"));
+    CHECK(!gemini_error_is_account(""));
+    CHECK(!gemini_error_is_account(NULL));
+}
+
 static void echo_detection(void)
 {
     const char *said = "Tomorrow will be sunny and mild, with a high of 64 degrees.";
@@ -348,6 +362,7 @@ static void transcripts_truncate_safely(void)
 int main(void)
 {
     RUN(base64_round_trips_all_lengths);
+    RUN(account_errors_are_recognised);
     RUN(base64_rejects_garbage_and_overflow);
     RUN(setup_message_matches_the_live_api);
     RUN(setup_without_tools_or_transcripts_omits_them);

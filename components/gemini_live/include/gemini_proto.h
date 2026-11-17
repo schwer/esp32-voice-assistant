@@ -113,3 +113,7 @@ void gemini_transcript_keep_tail(char *buf, size_t keep);
  * True when at least 3 words were heard and most of them appear in `said`.
  */
 bool gemini_looks_like_echo(const char *heard, const char *said);
+
+/** True if a Gemini error is about the account or key (no credit, quota, billing,
+ *  invalid key), so retrying with fewer features can't help. */
+bool gemini_error_is_account(const char *error);

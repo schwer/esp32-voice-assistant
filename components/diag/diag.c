@@ -349,8 +349,10 @@ cJSON *diag_test_gemini(void)
     ESP_LOGI(TAG, "Gemini check: HTTP %d", status);
     switch (status) {
     case 200: {
-        char msg[120];
-        snprintf(msg, sizeof(msg), "API key works, and the model \"%s\" is available.", settings_get_model());
+        char msg[288];
+        snprintf(msg, sizeof(msg), "The API key is valid and the model \"%s\" is available. (This test can't "
+                 "see whether the account has credit left: if conversations fail, check the Gemini line "
+                 "under Modules.)", settings_get_model());
         return result(true, status, msg);
     }
     case 404: {
