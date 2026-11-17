@@ -203,6 +203,18 @@ static void back_to_listening(void)
     wakeword_listen();
 }
 
+/** Public Wi-Fi (open network that isn't one of ours): no setup page for strangers. */
+static void on_wifi_trust(bool public_network)
+{
+    if (public_network) {
+        setup_web_stop();
+        diag_set_status("setup page", "off: on a public Wi-Fi network");
+    } else {
+        setup_web_start();
+        diag_set_status("setup page", "on");
+    }
+}
+
 /** A timer or alarm started (true) or stopped (false) ringing. Runs on the clock task. */
 static void on_ring(bool ringing, clock_ring_t kind, const char *label)
 {
@@ -375,6 +387,8 @@ void app_main(void)
     if (battery_init() != ESP_OK) ESP_LOGW(TAG, "battery sensing unavailable");
 
     ESP_ERROR_CHECK(net_init());
+    net_set_allow_open(settings_get_open_wifi());
+    net_on_trust_change(on_wifi_trust);
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
 
     // Setup page first, so the device stays configurable even if audio fails.

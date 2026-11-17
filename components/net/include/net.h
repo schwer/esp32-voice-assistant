@@ -1,18 +1,32 @@
 // SPDX-License-Identifier: MIT
-// Wi-Fi station management. Credentials are stored by the Wi-Fi driver in NVS.
+// Wi-Fi: the user's saved networks (home, phone hotspot, ...) and, if allowed, open
+// networks with no password. See net.c.
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include "net_logic.h"
 
 esp_err_t net_init(void);
-/** True if credentials have been saved (via Improv or the setup page). */
+/** True if at least one network has been saved (via the install page or the setup page). */
 bool net_has_credentials(void);
 /** Connect with saved credentials; waits up to timeout_ms. */
 esp_err_t net_connect(int timeout_ms);
-/** Try new credentials; saves them only if the connection succeeds. */
+/** Join a new network now; adds it to the saved networks only if that works. */
 esp_err_t net_provision(const char *ssid, const char *password, int timeout_ms);
+/** Save a network without joining it now (e.g. a phone hotspot that's off). */
+esp_err_t net_add_network(const char *ssid, const char *password);
+esp_err_t net_forget(const char *ssid);
+/** Saved network names, most recent first. Returns the count. */
+int net_saved_networks(char (*ssids)[NET_SSID_MAX], int max);
+/** Allow joining open networks (no password) when none of ours is around. */
+void net_set_allow_open(bool allow);
+/** Connected to an open network that isn't one of the saved ones. */
+bool net_on_public_network(void);
+/** Called (from the Wi-Fi task) when we move between our networks and public ones. */
+typedef void (*net_trust_cb_t)(bool public_network);
+void net_on_trust_change(net_trust_cb_t cb);
 /** Turn Wi-Fi off (battery saving between conversations). */
 void net_disconnect(void);
 bool net_is_connected(void);
@@ -20,7 +34,7 @@ bool net_is_connected(void);
 int net_scan(wifi_ap_record_t *out, int max);
 /** SSID of the connected network, or "" when offline. */
 void net_current_ssid(char *buf, size_t len);
-/** SSID saved in flash (even when not connected), or "". */
+/** The most recently saved network, or "". */
 void net_saved_ssid(char *buf, size_t len);
 /** Signal strength of the current connection in dBm (0 when offline). */
 int net_rssi(void);

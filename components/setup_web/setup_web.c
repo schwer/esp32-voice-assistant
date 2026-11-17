@@ -222,6 +222,10 @@ static esp_err_t get_root(httpd_req_t *req)
     if (saved) SEND(req, "<p class=ok>Saved.</p>");
     SEND(req, VOICE_PROGRESS_HTML);
     if (failed) SEND(req, "<p class=warn>Couldn't save. Check the values and try again.</p>");
+    if (strstr(q, "wifi=added")) SEND(req, "<p class=ok>Network added.</p>");
+    if (strstr(q, "wifi=forgot")) SEND(req, "<p class=ok>Network forgotten.</p>");
+    if (strstr(q, "wifi=bad")) SEND(req, "<p class=warn>Couldn't add that network: the name must be 1-32 "
+                                         "characters and the password blank or 8-63 characters.</p>");
     if (!settings_has_api_key()) {
         SEND(req, "<p class=warn>Add your Gemini API key to start using the assistant. "
                   "<a href='https://aistudio.google.com/apikey' target=_blank rel=noopener>Get a key</a></p>");
@@ -319,6 +323,14 @@ static esp_err_t get_root(httpd_req_t *req)
               "<p class=note>On battery, Wi-Fi turns off after 3 quiet minutes and back on when you say "
               "\"Jarvis\". This page is unreachable while it's off. On USB power Wi-Fi always stays on.</p>");
 
+    SEND(req, "<label class=check><input type=checkbox name=open_wifi value=1");
+    if (settings_get_open_wifi()) SEND(req, " checked");
+    SEND(req, "> Use free Wi-Fi with no password</label>"
+              "<p class=note>When none of your networks (below) is around, join an open network, but only "
+              "if it really reaches the internet: cafés and airports that want you to click \"Accept\" on a "
+              "page are skipped. On a public network this page switches itself off so strangers can't "
+              "change your settings.</p>");
+
     SEND(req, "<label class=check><input type=checkbox name=search value=1");
     if (settings_get_search()) SEND(req, " checked");
     SEND(req, "> Let Gemini search the web</label>"
@@ -333,6 +345,38 @@ static esp_err_t get_root(httpd_req_t *req)
 
     SEND(req, "<button type=submit>Save</button></form>");
 
+    // Wi-Fi networks: home, phone hotspot, work, ...
+    SEND(req, "<div class=card id=wifi><h2 style='margin-top:0'>Wi-Fi networks</h2>"
+              "<p class=note style='margin-top:0'>The board joins whichever of these is around, strongest first. "
+              "Add your phone's hotspot to use it away from home.</p>");
+    char (*nets)[NET_SSID_MAX] = calloc(NET_MAX_SAVED, NET_SSID_MAX);
+    int nn = nets ? net_saved_networks(nets, NET_MAX_SAVED) : 0;
+    char cur[NET_SSID_MAX] = "";
+    net_current_ssid(cur, sizeof(cur));
+    for (int i = 0; i < nn; i++) {
+        SEND(req, "<form method=post action=/wifi/forget class=netrow "
+                  "style='display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0'>"
+                  "<span>");
+        send_escaped(req, nets[i]);
+        if (!strcmp(nets[i], cur)) SEND(req, " <small class=ok>(connected)</small>");
+        SEND(req, "</span><input type=hidden name=ssid value=\"");
+        send_escaped(req, nets[i]);
+        SEND(req, "\"><button type=submit style='margin:0;flex:none'"
+                  " onclick=\"return confirm('Forget this network?')\">Forget</button></form>");
+    }
+    free(nets);
+    if (!nn) SEND(req, "<p class=note>None saved yet.</p>");
+    SEND(req, "<form method=post action=/wifi/add style='margin-top:12px'>"
+              "<label for=nssid>Add a network</label>"
+              "<input id=nssid name=ssid maxlength=32 required placeholder='Network name' autocomplete=off "
+              "autocapitalize=none spellcheck=false>"
+              "<input name=pass type=password maxlength=63 placeholder='Password (blank if none)' "
+              "autocomplete=new-password style='margin-top:6px'>"
+              "<p class=note>It doesn't need to be switched on now: the board uses it whenever it's around. "
+              "Names are case-sensitive; the board only sees 2.4 GHz networks (on iPhone, turn on "
+              "\"Maximise Compatibility\").</p>"
+              "<button type=submit>Add network</button></form></div>");
+
     const esp_app_desc_t *app = esp_app_get_description();
     SEND(req, "<div class=card><dl><dt>Address</dt><dd>");
     send_escaped(req, url[0] ? url : "-");
@@ -343,6 +387,57 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "</dd></dl><p style='margin:14px 0 0'><a href='/diag'>Diagnostics &rarr;</a></p>"
               "</div></main></body></html>");
     return httpd_resp_sendstr_chunk(req, NULL);
+}
+
+/** Read a small form body. Returns false (and replies) if it's too large or broken. */
+static bool read_form(httpd_req_t *req, char *body, size_t len)
+{
+    if (req->content_len >= len) {
+        httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "Too large");
+        return false;
+    }
+    int got = 0;
+    while (got < (int)req->content_len) {
+        int r = httpd_req_recv(req, body + got, req->content_len - got);
+        if (r <= 0) return false;
+        got += r;
+    }
+    body[got] = 0;
+    return true;
+}
+
+static esp_err_t redirect(httpd_req_t *req, const char *to)
+{
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", to);
+    return httpd_resp_send(req, NULL, 0);
+}
+
+static esp_err_t post_wifi_add(httpd_req_t *req)
+{
+    if (!same_origin(req)) return forbid(req);
+    char body[256], ssid[NET_SSID_MAX] = "", pass[NET_PASS_MAX] = "";
+    if (!read_form(req, body, sizeof(body))) return ESP_FAIL;
+    form_field(body, "ssid", ssid, sizeof(ssid));
+    form_field(body, "pass", pass, sizeof(pass));
+    esp_err_t err = net_add_network(ssid, pass);
+    memset(body, 0, sizeof(body));
+    memset(pass, 0, sizeof(pass));
+    if (err == ESP_OK) {
+        leds_event(LEDS_EVENT_SAVED);
+        prompts_say(PROMPT_SETTINGS_SAVED);
+    }
+    return redirect(req, err == ESP_OK ? "/?wifi=added#wifi" : "/?wifi=bad#wifi");
+}
+
+static esp_err_t post_wifi_forget(httpd_req_t *req)
+{
+    if (!same_origin(req)) return forbid(req);
+    char body[160], ssid[NET_SSID_MAX] = "";
+    if (!read_form(req, body, sizeof(body))) return ESP_FAIL;
+    form_field(body, "ssid", ssid, sizeof(ssid));
+    if (net_forget(ssid) == ESP_OK) leds_event(LEDS_EVENT_DELETED);
+    return redirect(req, "/?wifi=forgot#wifi");
 }
 
 static esp_err_t post_save(httpd_req_t *req)
@@ -403,6 +498,9 @@ static esp_err_t post_save(httpd_req_t *req)
         err |= settings_set_search(search);
         bool saver = form_field(body, "saver", val, sizeof(val)) && strcmp(val, "1") == 0;
         err |= settings_set_battery_saver(saver);
+        bool open_wifi = form_field(body, "open_wifi", val, sizeof(val)) && strcmp(val, "1") == 0;
+        err |= settings_set_open_wifi(open_wifi);
+        net_set_allow_open(open_wifi);
         bool barge = form_field(body, "barge", val, sizeof(val)) && strcmp(val, "1") == 0;
         err |= settings_set_barge_in(barge);
         bool proactive = form_field(body, "proactive", val, sizeof(val)) && strcmp(val, "1") == 0;
@@ -721,6 +819,8 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
         { .uri = "/diag/stop-ringing",.method = HTTP_POST, .handler = post_stop_ringing },
+        { .uri = "/wifi/add",         .method = HTTP_POST, .handler = post_wifi_add },
+        { .uri = "/wifi/forget",      .method = HTTP_POST, .handler = post_wifi_forget },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },
         { .uri = "/diag/voice-record",.method = HTTP_POST, .handler = post_voice_rerecord },

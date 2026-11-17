@@ -186,7 +186,17 @@ cJSON *diag_snapshot(void)
         cJSON_AddStringToObject(wifi, "signal",
             ap.rssi >= -60 ? "good" : ap.rssi >= -70 ? "fair" : "weak");
         cJSON_AddNumberToObject(wifi, "channel", ap.primary);
+        cJSON_AddStringToObject(wifi, "kind", net_on_public_network() ? "public (open) network" : "one of your networks");
     }
+    char nets[NET_MAX_SAVED][NET_SSID_MAX];
+    int nn = net_saved_networks(nets, NET_MAX_SAVED);
+    char list[NET_MAX_SAVED * (NET_SSID_MAX + 2)] = "";
+    for (int i = 0; i < nn; i++) {
+        if (i) strlcat(list, ", ", sizeof(list));
+        strlcat(list, nets[i], sizeof(list));
+    }
+    cJSON_AddStringToObject(wifi, "saved_networks", nn ? list : "none");
+    cJSON_AddBoolToObject(wifi, "free_wifi_allowed", settings_get_open_wifi());
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t ip;
     if (netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr) {

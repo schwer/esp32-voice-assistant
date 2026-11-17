@@ -28,6 +28,10 @@ There's no phone app and no cloud backend of your own.
 - **Google Search** grounding for current information (when the model supports it)
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
   hear the saved ones newest first and say "that one"
+- **Wi-Fi anywhere**: remembers up to 5 networks (home, your phone's hotspot, work) and joins
+  whichever is around. Optionally uses free Wi-Fi with no password, but only if it really reaches
+  the internet (networks that want you to click "Accept" on a page are skipped), and the setup page
+  switches itself off on public networks.
 - **Battery saver**: on battery, Wi-Fi turns off after 3 quiet minutes and back on at "Jarvis"
   (your first words are buffered meanwhile); the radio dozes whenever idle. See [docs/power.md](docs/power.md).
 - Local setup page at `http://assistant.local`, with a diagnostics page at `/diag`
@@ -48,7 +52,7 @@ speaker ← I2S ← jitter buffer ← 24→16 kHz resample ─┘
 |---|---|
 | `components/board` | Pin map and I2C addresses for the target board |
 | `components/wakeword` | Always-on wake word detection |
-| `components/net` | Wi-Fi station, credentials in NVS, power on/off |
+| `components/net` | Wi-Fi: saved networks, free open networks (with an internet check), power on/off |
 | `components/improv` | Improv Wi-Fi over serial for the web flasher |
 | `components/leds` | LED ring status lights (legend and previews on `/diag`) |
 | `components/storage` | LittleFS on the `storage` partition at `/data` |
@@ -100,6 +104,8 @@ CI regenerates the clips with Piper TTS when that file changes.
 2. Connect the board over USB and click **Install**. The latest firmware installs automatically;
    updates keep your Wi-Fi and settings.
 3. Pick your Wi-Fi network from the list the board sees (2.4 GHz) and enter the password.
+   Add more networks (e.g. your phone's hotspot) later with **Add Wi-Fi network** here or on the
+   board's setup page.
 4. Open the setup page link shown by the installer and paste your
    [Gemini API key](https://aistudio.google.com/apikey).
 5. Say **"Jarvis"**.
@@ -130,7 +136,7 @@ battery readings) still needs a board: use the diagnostics page's tests.
 Hardware-independent code lives in modules without ESP-IDF dependencies so it can be tested
 on a normal computer: `components/dsp`, `components/battery/battery_est.c`,
 `components/improv/improv_proto.c`, `components/setup_web/web_util.c`,
-`components/gemini_live/gemini_proto.c`, `components/clock/clock_logic.c`.
+`components/gemini_live/gemini_proto.c`, `components/clock/clock_logic.c`, `components/net/net_logic.c`.
 
 ## Security notes
 

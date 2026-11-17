@@ -52,6 +52,10 @@ esp_err_t settings_set_proactive(bool on);
 bool settings_get_battery_saver(void);
 esp_err_t settings_set_battery_saver(bool on);
 
+/** Join open Wi-Fi (no password) when none of the saved networks is around. Default on. */
+bool settings_get_open_wifi(void);
+esp_err_t settings_set_open_wifi(bool on);
+
 /** Spoken status messages ("I need Wi-Fi", "Settings saved", ...). Default on. */
 bool settings_get_spoken_status(void);
 esp_err_t settings_set_spoken_status(bool on);

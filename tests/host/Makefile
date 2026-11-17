@@ -8,16 +8,18 @@ CFLAGS  ?= -std=c11 -O1 -g -Wall -Wextra -Werror -Wno-missing-field-initializers
 SAN     ?= -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
 INC     := -I. -I$(ROOT)/components/dsp/include -I$(ROOT)/components/battery/include \
            -I$(ROOT)/components/improv/include -I$(ROOT)/components/setup_web/include \
-           -I$(ROOT)/components/gemini_live/include -I$(ROOT)/components/clock/include -Ivendor/cjson
+           -I$(ROOT)/components/gemini_live/include -I$(ROOT)/components/clock/include \
+           -I$(ROOT)/components/net/include -Ivendor/cjson
 BUILD   := build
 
-TESTS := dsp battery improv web gemini clock
+TESTS := dsp battery improv web gemini clock net
 SRC_dsp     := $(ROOT)/components/dsp/dsp.c
 SRC_battery := $(ROOT)/components/battery/battery_est.c
 SRC_improv  := $(ROOT)/components/improv/improv_proto.c
 SRC_web     := $(ROOT)/components/setup_web/web_util.c
 SRC_gemini  := $(ROOT)/components/gemini_live/gemini_proto.c vendor/cjson/cJSON.c
 SRC_clock   := $(ROOT)/components/clock/clock_logic.c
+SRC_net     := $(ROOT)/components/net/net_logic.c
 
 .PHONY: test clean
 test: $(TESTS:%=$(BUILD)/test_%)

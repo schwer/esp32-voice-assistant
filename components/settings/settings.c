@@ -15,7 +15,7 @@ static bool s_spoken = true;
 static char s_model[SETTINGS_MODEL_MAX];
 static char s_voice[SETTINGS_VOICE_MAX];
 static char s_location[SETTINGS_LOCATION_MAX];
-static bool s_fahrenheit, s_search = true, s_saver = true, s_barge = true, s_proactive = true;
+static bool s_fahrenheit, s_search = true, s_saver = true, s_open_wifi = true, s_barge = true, s_proactive = true;
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
 {
@@ -57,6 +57,9 @@ esp_err_t settings_init(void)
     uint8_t saver = 1;
     nvs_get_u8(h, "saver", &saver);
     s_saver = saver != 0;
+    uint8_t open_wifi = 1;
+    nvs_get_u8(h, "open_wifi", &open_wifi);
+    s_open_wifi = open_wifi != 0;
     uint8_t spoken = 1;
     nvs_get_u8(h, "spoken", &spoken);
     s_spoken = spoken != 0;
@@ -161,6 +164,14 @@ esp_err_t settings_set_battery_saver(bool on)
 {
     esp_err_t err = save_u8("saver", on);
     if (err == ESP_OK) s_saver = on;
+    return err;
+}
+
+bool settings_get_open_wifi(void) { return s_open_wifi; }
+esp_err_t settings_set_open_wifi(bool on)
+{
+    esp_err_t err = save_u8("open_wifi", on);
+    if (err == ESP_OK) s_open_wifi = on;
     return err;
 }
 
