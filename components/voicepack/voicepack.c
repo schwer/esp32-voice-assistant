@@ -48,7 +48,7 @@ static volatile size_t s_cap_len;
 
 static void voice_dir(const char *voice, char *buf, size_t len)
 {
-    snprintf(buf, len, PROMPTS_RECORDED_DIR "/%s", voice);
+    snprintf(buf, len, PROMPTS_RECORDED_DIR "/%.31s", voice);   // voice names are short
 }
 
 static void read_lines(const char *path, char *l1, size_t n1, char *l2, size_t n2)
