@@ -7,7 +7,7 @@ set(clips ready need_wifi need_api_key wifi_lost wifi_back no_internet gemini_fa
           update_started update_done update_failed update_offer)
 set(clip_files)
 foreach(c ${clips})
-    list(APPEND clip_files "clips/${c}.pcm")
+    list(APPEND clip_files "clips/${c}.ulaw")   # 16 kHz mu-law, 8 bits/sample
 endforeach()
 
 idf_component_register(

@@ -23,6 +23,9 @@ from piper import PiperVoice
 from piper.config import SynthesisConfig
 from scipy.signal import butter, sosfiltfilt, lfilter
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ulaw import ulaw_encode  # noqa: E402
+
 TARGET_RATE = 16000
 TAIL_S = 0.08
 SPEED = 1.08            # length scale: slightly slower than default, easier to follow
@@ -79,6 +82,7 @@ def trim(audio: np.ndarray, thresh: float = 0.01) -> np.ndarray:
     return audio[start:end]
 
 
+
 def main() -> None:
     model, tsv, out_dir = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -94,8 +98,10 @@ def main() -> None:
         audio[-fade:] *= np.linspace(1, 0, fade)
         audio = np.concatenate([audio, np.zeros(int(TAIL_S * TARGET_RATE), dtype=np.float32)])
         pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
-        (out_dir / f"{pid}.pcm").write_bytes(pcm.tobytes())
-        total += pcm.nbytes
+        enc = ulaw_encode(pcm)                        # 8 bits per sample: half the firmware space
+        (out_dir / f"{pid}.ulaw").write_bytes(enc.tobytes())
+        (out_dir / f"{pid}.pcm").unlink(missing_ok=True)
+        total += enc.nbytes
         print(f"{pid:16s} {len(pcm) / TARGET_RATE:5.2f}s  {text}")
     print(f"total {total / 1024:.0f} KB")
 

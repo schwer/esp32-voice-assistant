@@ -195,15 +195,36 @@ def test_phrase_list_enum_ids_and_clips_agree():
     assert sorted(ids) == sorted(table), "tools/prompts.tsv and IDS[] differ"
     assert clips == table, "CMakeLists clip list must follow the enum order"
     for pid in table:
-        assert (ROOT / f"components/prompts/clips/{pid}.pcm").exists(), f"missing clip {pid}.pcm"
+        assert (ROOT / f"components/prompts/clips/{pid}.ulaw").exists(), f"missing clip {pid}.ulaw"
     assert (ROOT / "components/prompts/clips/voice.txt").exists()
 
 
-def test_clips_are_16khz_mono_pcm_of_reasonable_length():
+def test_ulaw_encoder_matches_the_firmware():
+    # Port of dsp_ulaw_encode() (components/dsp/dsp.c), checked for every 16-bit value.
+    sys.path.insert(0, str(TOOLS))
+    import numpy as np
+    from ulaw import ulaw_encode
+
+    def c_encode(pcm):
+        sign = (pcm >> 8) & 0x80
+        v = -pcm if sign else pcm
+        v = min(v, 32635) + 0x84
+        exp, mask = 7, 0x4000
+        while (v & mask) == 0 and exp > 0:
+            mask >>= 1
+            exp -= 1
+        return ~(sign | (exp << 4) | ((v >> (exp + 3)) & 0x0F)) & 0xFF
+
+    values = np.arange(-32768, 32768, dtype=np.int32)
+    expected = np.array([c_encode(int(v)) for v in values], dtype=np.uint8)
+    assert (ulaw_encode(values.astype(np.int16)) == expected).all()
+
+
+def test_clips_are_16khz_mono_ulaw_of_reasonable_length():
     for pid in tsv_ids():
-        n = (ROOT / f"components/prompts/clips/{pid}.pcm").stat().st_size
-        assert n % 2 == 0
-        seconds = n / 2 / 16000
+        n = (ROOT / f"components/prompts/clips/{pid}.ulaw").stat().st_size
+        assert not (ROOT / f"components/prompts/clips/{pid}.pcm").exists()
+        seconds = n / 16000
         assert 0.3 < seconds < 12, f"{pid}: {seconds:.1f} s"
 
 
