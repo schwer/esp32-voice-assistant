@@ -53,4 +53,11 @@ menu "Voice Assistant"
 
 
 
+    config VA_UPDATE_URL
+        string "Update manifest URL (updates over Wi-Fi)"
+        default "https://schwer.github.io/esp32-voice-assistant/manifest.json"
+        help
+            Where "Jarvis, update yourself" looks for new firmware: the web installer's
+            manifest.json. Must be https. Forks: point this at your own GitHub Pages site.
+
 endmenu

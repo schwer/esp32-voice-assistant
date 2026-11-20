@@ -9,6 +9,7 @@
 #include "battery.h"
 #include "settings.h"
 #include "clock.h"
+#include "ota.h"
 
 static const char *TAG = "tools";
 
@@ -89,6 +90,14 @@ cJSON *tools_declarations(void)
              "your battery, power, charging or how long you'll last.",
              NULL, NULL, 0);
 
+    function(decls, "check_for_update",
+             "Check whether a newer version of your own software is available. Never installs anything.",
+             NULL, NULL, 0);
+    function(decls, "install_update",
+             "Install the available software update now; you restart and are back in about a minute. "
+             "Only call this after the user has clearly said yes to installing it.",
+             NULL, NULL, 0);
+
     function(decls, "end_conversation",
              "End the conversation. Call after saying a short goodbye, when the user says "
              "goodbye or that they're done.",
@@ -134,7 +143,13 @@ const char *tools_system_instruction(void)
         "- Confirm in one short sentence using the time and day the tool returns (say times the "
         "way people speak, e.g. \"7:30 tomorrow morning\"). If the tool returns an error, say it simply.\n"
         "- For \"how long is left\", use list_timers; for stopwatch questions use stopwatch with "
-        "action status. If several timers or alarms match a cancel request, ask which one.\n";
+        "action status. If several timers or alarms match a cancel request, ask which one.\n"
+        "Software updates: you only update when the user asks. When they ask you to update "
+        "yourself or whether there's an update, call check_for_update. If one is available, say so "
+        "(give its date in words, not the code after it) and ask whether to install it now; call "
+        "install_update only after a clear yes. If there's none, say you're up to date. If it needs "
+        "the web install page, say it needs one install from the install page with a USB cable. "
+        "After install_update succeeds, just say \"Okay\": you announce the update yourself.\n";
 }
 
 // ---------- dispatch ----------
@@ -156,6 +171,9 @@ cJSON *tools_handle_call(const char *name, const cJSON *args)
 {
     ESP_LOGI(TAG, "tool call: %s", name);
 
+    if (strcmp(name, "check_for_update") == 0) {
+        return ota_tool_check();
+    }
     if (strcmp(name, "get_battery_status") == 0) {
         return battery_report();
     }

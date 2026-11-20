@@ -27,7 +27,10 @@ typedef enum {
     PROMPT_BATTERY_LOW,    // "My battery is at ten percent. Please charge me soon."
     PROMPT_BATTERY_CRITICAL, // "My battery is almost empty. I'll turn off soon unless you charge me."
     PROMPT_TIMER_DONE,     // "Your timer is done."
-    PROMPT_ALARM_RINGING,  // "Your alarm is going off."
+    PROMPT_ALARM_RINGING,
+    PROMPT_UPDATE_STARTED,
+    PROMPT_UPDATE_DONE,
+    PROMPT_UPDATE_FAILED,  // "Your alarm is going off."
     PROMPT_COUNT
 } prompt_t;
 

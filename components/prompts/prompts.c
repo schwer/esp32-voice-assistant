@@ -64,6 +64,12 @@ extern const uint8_t timer_done_pcm_start[] asm("_binary_timer_done_pcm_start");
 extern const uint8_t timer_done_pcm_end[]   asm("_binary_timer_done_pcm_end");
 extern const uint8_t alarm_ringing_pcm_start[] asm("_binary_alarm_ringing_pcm_start");
 extern const uint8_t alarm_ringing_pcm_end[]   asm("_binary_alarm_ringing_pcm_end");
+extern const uint8_t update_started_pcm_start[] asm("_binary_update_started_pcm_start");
+extern const uint8_t update_started_pcm_end[]   asm("_binary_update_started_pcm_end");
+extern const uint8_t update_done_pcm_start[] asm("_binary_update_done_pcm_start");
+extern const uint8_t update_done_pcm_end[]   asm("_binary_update_done_pcm_end");
+extern const uint8_t update_failed_pcm_start[] asm("_binary_update_failed_pcm_start");
+extern const uint8_t update_failed_pcm_end[]   asm("_binary_update_failed_pcm_end");
 
 static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { ready_pcm_start, ready_pcm_end },
@@ -89,6 +95,9 @@ static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { battery_critical_pcm_start, battery_critical_pcm_end },
     { timer_done_pcm_start, timer_done_pcm_end },
     { alarm_ringing_pcm_start, alarm_ringing_pcm_end },
+    { update_started_pcm_start, update_started_pcm_end },
+    { update_done_pcm_start, update_done_pcm_end },
+    { update_failed_pcm_start, update_failed_pcm_end },
 };
 
 // Ids in enum order (must match prompt_t and tools/prompts.tsv).
@@ -98,6 +107,7 @@ static const char *const IDS[PROMPT_COUNT] = {
     "wake_ack_1", "wake_ack_2", "wake_ack_3", "not_ready",
     "mic_test_start", "mic_test_hello", "mic_test_nothing",
     "battery_low", "battery_critical", "timer_done", "alarm_ringing",
+    "update_started", "update_done", "update_failed",
 };
 
 // The phrase list itself is embedded so the device can re-record lines in Gemini's voice.

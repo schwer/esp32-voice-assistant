@@ -118,3 +118,27 @@ test('alarms & timers card, and Stop ringing', async ({ page }) => {
   await page.reload();
   await expect(card).toContainText('No timers, alarms or stopwatch.');
 });
+
+test('software update: check, then install only after confirming', async ({ page }) => {
+  const { calls } = await serve(page, DIAG_HTML(), {
+    'GET /diag.json': () => ({ ...snapshot({ level: '80%' }),
+      updates: { this_version: '2026.11.17-1111111', latest_version: '2026.11.20-2222222', status: 'update available' } }),
+    'GET /diag/leds.json': () => IDLE, 'GET /diag/messages.json': () => MESSAGES,
+    'POST /diag/update-check': () => ({ ok: true, message: 'Version 2026.11.20-2222222 is available.' }),
+    'POST /diag/update-install': () => ({ ok: true, message: 'Installing.' }),
+  });
+  await page.goto('http://dev/diag');
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Software update' }) });
+  await expect(card).toContainText('2026.11.20-2222222');
+  await page.click('button[data-act="update-check"]');
+  await expect(page.locator('#result')).toHaveText('Version 2026.11.20-2222222 is available.');
+  page.removeAllListeners('dialog');                          // answer the confirmation ourselves
+  page.once('dialog', (d) => d.dismiss());                     // "Cancel": nothing installed
+  await page.click('button[data-act="update-install"]');
+  await page.waitForTimeout(300);
+  expect(calls.some((c) => c.key === 'POST /diag/update-install')).toBe(false);
+  page.once('dialog', (d) => d.accept());
+  await page.click('button[data-act="update-install"]');
+  await expect(page.locator('#result')).toHaveText('Installing.');
+  expect(calls.find((c) => c.key === 'POST /diag/update-install').headers['x-assistant']).toBe('1');
+});

@@ -3,6 +3,7 @@
 
 Run: python -m pytest tests/tools
 """
+import hashlib
 import json
 import re
 import subprocess
@@ -38,8 +39,9 @@ def run_collect(build: Path, out: Path):
 GOOD = {
     "0x0": ("bootloader/bootloader.bin", 21000),
     "0x8000": ("partition_table/partition-table.bin", 3072),
-    "0x10000": ("esp32-voice-assistant.bin", 400000),
-    "0x610000": ("srmodels/srmodels.bin", 290000),
+    "0x10000": ("ota_data_initial.bin", 8192),
+    "0x20000": ("esp32-voice-assistant.bin", 400000),
+    "0xf10000": ("srmodels/srmodels.bin", 290000),
 }
 
 
@@ -48,8 +50,11 @@ def test_collect_parts_lists_every_part_in_offset_order(tmp_path):
     r = run_collect(make_build(tmp_path, GOOD), out)
     assert r.returncode == 0, r.stderr
     parts = json.loads((out / "parts.json").read_text())
-    assert [p["offset"] for p in parts] == [0x0, 0x8000, 0x10000, 0x610000]
+    assert [p["offset"] for p in parts] == [0x0, 0x8000, 0x10000, 0x20000, 0xf10000]
     assert all((out / Path(p["path"]).name).exists() for p in parts)
+    app = next(p for p in parts if p["path"].endswith("esp32-voice-assistant.bin"))
+    data = (out / "esp32-voice-assistant.bin").read_bytes()
+    assert app["sha256"] == hashlib.sha256(data).hexdigest() and app["size"] == len(data)
 
 
 def test_collect_parts_refuses_anything_overlapping_nvs(tmp_path):
@@ -85,6 +90,20 @@ def test_manifest_format(tmp_path):
                                        {"path": "firmware/b.bin", "offset": 65536}]
 
 
+def test_manifest_describes_the_update_for_the_board(tmp_path):
+    parts = [{"path": "firmware/bootloader.bin", "offset": 0, "size": 1, "sha256": "00"},
+             {"path": "firmware/esp32-voice-assistant.bin", "offset": 0x20000, "size": 5, "sha256": "aa"},
+             {"path": "firmware/srmodels.bin", "offset": 0xf10000, "size": 7, "sha256": "bb"}]
+    pj = tmp_path / "parts.json"
+    pj.write_text(json.dumps(parts))
+    r = subprocess.run([sys.executable, str(TOOLS / "write_manifest.py"), str(pj), "2026.11.20-abc1234",
+                        "abc1234deadbeef"], capture_output=True, text=True, check=True)
+    ota = json.loads(r.stdout)["ota"]
+    assert ota["layout"] == 2
+    assert ota["app"] == {"path": "firmware/esp32-voice-assistant.bin", "size": 5, "sha256": "aa"}
+    assert ota["model"] == {"path": "firmware/srmodels.bin", "size": 7, "sha256": "bb"}
+
+
 def test_firmware_reports_the_manifest_name():
     improv = (ROOT / "components/improv/improv.c").read_text()
     assert '"ESP32 Voice Assistant"' in improv
@@ -117,6 +136,20 @@ def test_nvs_never_moves():
     # Wi-Fi, the API key and settings live here; moving it would wipe them on update.
     nvs = next(r for r in partitions() if r["name"] == "nvs")
     assert (nvs["offset"], nvs["size"]) == (0x9000, 0x6000)
+
+
+def test_storage_never_moves():
+    # Recordings, conversations and alarms live here; it kept its place when the
+    # two firmware slots were added, so nothing was lost.
+    st = next(r for r in partitions() if r["name"] == "storage")
+    assert (st["offset"], st["size"]) == (0x910000, 0x600000)
+
+
+def test_two_firmware_slots_fit_the_app_with_room_to_grow():
+    slots = [r for r in partitions() if r["type"] == "app"]
+    assert [r["name"] for r in slots] == ["ota_0", "ota_1"]
+    assert all(r["size"] >= 0x3D67D0 * 1.1 for r in slots)        # app was 0x3D67D0 bytes
+    assert any(r["name"] == "otadata" for r in partitions())
 
 
 def test_partitions_fit_16mb_flash_without_overlap():

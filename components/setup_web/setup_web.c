@@ -28,6 +28,7 @@
 #include "selftest.h"
 #include "voicepack.h"
 #include "clock.h"
+#include "ota.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -566,6 +567,16 @@ static esp_err_t get_diag_json(httpd_req_t *req)
     s_last_activity_us = esp_timer_get_time();
     cJSON *d = diag_snapshot();
     cJSON_AddItemToObject(d, "clock", clock_snapshot());
+    ota_status_t st = ota_last_status();
+    cJSON *up = cJSON_AddObjectToObject(d, "updates");
+    cJSON_AddStringToObject(up, "this_version", st.current);
+    if (st.ok) {
+        cJSON_AddStringToObject(up, "latest_version", st.latest);
+        cJSON_AddStringToObject(up, "status", st.available ? "update available: press Install update, or say \"Jarvis, update yourself\""
+                                              : st.needs_usb ? st.why : "up to date");
+    } else {
+        cJSON_AddStringToObject(up, "status", st.checked ? st.why : "not checked yet");
+    }
     return send_json(req, d);
 }
 
@@ -633,6 +644,40 @@ static esp_err_t post_speaker_test(httpd_req_t *req)
     cJSON_AddBoolToObject(r, "ok", true);
     cJSON_AddStringToObject(r, "message",
         "Playing a test message. If you hear nothing, check the Speaker line under Modules.");
+    return send_json(req, r);
+}
+
+static esp_err_t post_update_check(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    ota_status_t st;
+    ota_check(&st);
+    char msg[220];
+    if (!st.ok) snprintf(msg, sizeof(msg), "Couldn't check: %s.", st.why);
+    else if (st.available) snprintf(msg, sizeof(msg), "Version %s is available (this is %s). Press Install update to install it.", st.latest, st.current);
+    else if (st.needs_usb) snprintf(msg, sizeof(msg), "Version %s is available, but %s: install it from the web install page with a USB cable.", st.latest, st.why);
+    else snprintf(msg, sizeof(msg), "Up to date (%s).", st.current);
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", st.ok);
+    cJSON_AddStringToObject(r, "message", msg);
+    return send_json(req, r);
+}
+
+static esp_err_t post_update_install(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    ota_status_t st;
+    ota_check(&st);
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", st.available);
+    if (st.available) {
+        ota_request_install();
+        cJSON_AddStringToObject(r, "message", "Installing. The board says when it starts and when it's done "
+                                "(about a minute); this page reconnects by itself.");
+    } else {
+        cJSON_AddStringToObject(r, "message", st.needs_usb ? "This update needs the web install page (USB)."
+                                              : st.ok ? "Already up to date." : "Couldn't reach the update site.");
+    }
     return send_json(req, r);
 }
 
@@ -801,7 +846,7 @@ esp_err_t setup_web_start(void)
     cfg.stack_size = 10240;              // the API key test does a TLS handshake here
     cfg.lru_purge_enable = true;         // a new browser connection closes the oldest idle one
     cfg.max_open_sockets = 5;            // leave sockets for Gemini, weather, time and mDNS
-    cfg.max_uri_handlers = 24;
+    cfg.max_uri_handlers = 32;
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
         return err;
@@ -819,6 +864,8 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/speaker-test",.method = HTTP_POST, .handler = post_speaker_test },
         { .uri = "/diag/mic-test",    .method = HTTP_POST, .handler = post_mic_test },
         { .uri = "/diag/stop-ringing",.method = HTTP_POST, .handler = post_stop_ringing },
+        { .uri = "/diag/update-check",.method = HTTP_POST, .handler = post_update_check },
+        { .uri = "/diag/update-install",.method = HTTP_POST, .handler = post_update_install },
         { .uri = "/wifi/add",         .method = HTTP_POST, .handler = post_wifi_add },
         { .uri = "/wifi/forget",      .method = HTTP_POST, .handler = post_wifi_forget },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },

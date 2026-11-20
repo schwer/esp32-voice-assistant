@@ -40,3 +40,7 @@ CONFIG_LWIP_MAX_SOCKETS=20
 # RAM ran short a Gemini connection failed with "esp-aes: Failed to allocate memory".
 # Our traffic (~50 KB/s of audio) is easy work for software AES.
 CONFIG_MBEDTLS_HARDWARE_AES=n
+
+# Updates over Wi-Fi: a new version must prove itself (start, reach Wi-Fi) or the
+# board goes back to the previous one.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

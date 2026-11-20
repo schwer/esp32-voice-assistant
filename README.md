@@ -32,6 +32,10 @@ There's no phone app and no cloud backend of your own.
   whichever is around. Optionally uses free Wi-Fi with no password, but only if it really reaches
   the internet (networks that want you to click "Accept" on a page are skipped), and the setup page
   switches itself off on public networks.
+- **Updates by voice**: "Jarvis, is there an update?" / "Jarvis, update yourself". It only ever
+  installs when you ask (or press Install update on the diagnostics page) and says when it starts,
+  when it's done, or that it didn't work. It mentions a new version once, at the end of an answer.
+  See [Updates over Wi-Fi](#updates-over-wi-fi).
 - **Battery saver**: on battery, Wi-Fi turns off after 3 quiet minutes and back on at "Jarvis"
   (your first words are buffered meanwhile); the radio dozes whenever idle. See [docs/power.md](docs/power.md).
 - Local setup page at `http://assistant.local`, with a diagnostics page at `/diag`
@@ -149,3 +153,26 @@ on a normal computer: `components/dsp`, `components/battery/battery_est.c`,
 MIT. See [LICENSE](LICENSE).
 
 Not affiliated with or endorsed by Google. "Gemini" is a trademark of Google LLC.
+
+## Updates over Wi-Fi
+
+Say "Jarvis, update yourself" (he checks, tells you the new version and asks before installing) or
+use **Check for updates** / **Install update** on the diagnostics page. The board never installs
+anything on its own: it only checks twice a day, and mentions a new version once.
+
+How it's kept safe:
+
+- It downloads only from the HTTPS site built into the firmware (`CONFIG_VA_UPDATE_URL`, this
+  project's GitHub Pages site), with the certificate checked, and only files next to its manifest.
+- The download must have exactly the size and SHA-256 listed in the manifest, be this project's
+  firmware for the ESP32-S3, and pass the chip's own image checks. Older versions are never installed.
+- The new version runs on trial: if it crashes, or can't reach Wi-Fi within 5 minutes, the board goes
+  back to the previous version by itself and says the update didn't work.
+- It won't start on a low battery (below 25% and not charging).
+
+Not covered: the images aren't cryptographically signed, so the update is only as trustworthy as
+this GitHub repository and its Pages site (see the supply-chain issue).
+
+The first time, install from the web page with a USB cable: that sets up the two firmware slots
+updates need. Wi-Fi, settings, recordings, conversations and alarms are kept. If a later version
+changes the memory layout or the "Jarvis" model, the board says it needs the web page again.

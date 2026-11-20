@@ -25,6 +25,8 @@
 #include "battery.h"
 #include "voicepack.h"
 #include "clock.h"
+#include "ota.h"
+#include "esp_system.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -99,7 +101,14 @@ static char *build_instruction(bool google_search, bool proactive)
 
     char *appts = appointments_summary(14);
     const char *tools = tools_system_instruction();
-    size_t len = 2048 + strlen(tools) + (appts ? strlen(appts) : 0);
+    char update_note[200] = "", newver[48];
+    if (ota_should_mention(newver, sizeof(newver))) {
+        snprintf(update_note, sizeof(update_note),
+                 "A software update for you is available (version %s). At the end of your first answer, "
+                 "mention it once in a few words and that they can say \"update yourself\" to install it.\n",
+                 newver);
+    }
+    size_t len = 2048 + strlen(tools) + strlen(update_note) + (appts ? strlen(appts) : 0);
     char *buf = malloc(len);
     if (buf) {
         snprintf(buf, len,
@@ -110,7 +119,7 @@ static char *build_instruction(bool google_search, bool proactive)
             "Current local date and time: %s (time zone %s).\n"
             "When the user says goodbye, thanks you to finish, or says they're done, say a very "
             "short goodbye and then call end_conversation.\n"
-            "%s"
+            "%s%s"
             "The user's home location is %s.\n"
             "%s"
             "%s%s%s",
@@ -120,6 +129,7 @@ static char *build_instruction(bool google_search, bool proactive)
                         "and wait: don't add follow-up questions or keep talking unless you need more "
                         "information to help. If the user starts talking while you speak, stop and listen.\n"
                       : "",
+            update_note,
             settings_get_location()[0] ? settings_get_location() : "not set",
             google_search ? "Use Google Search for current information such as news, sports, "
                             "opening hours, prices and facts you're unsure about.\n" : "",
@@ -170,8 +180,86 @@ static void on_light_change(leds_state_t from, leds_state_t to)
 }
 
 /** Wraps tool calls with light feedback (thinking, then saved/deleted). */
+static void update_progress(int pct)
+{
+    char s[48];
+    snprintf(s, sizeof(s), "downloading: %d%%", pct);
+    diag_set_status("update", s);
+}
+
+/** Install a requested update (only ever runs when someone asked for it). */
+static void do_update(void)
+{
+    ESP_LOGW(TAG, "installing an update, as asked");
+    diag_set_status("update", "starting");
+    leds_set(LEDS_CONNECTING);
+    prompts_say_always(PROMPT_UPDATE_STARTED);         // "Updating now..."
+    audio_wait_idle(8000);
+    net_power_save(false);
+    esp_err_t err = ota_install(update_progress);
+    if (err == ESP_OK) {
+        diag_set_status("update", "installed: restarting into the new version");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+    char why[160];
+    snprintf(why, sizeof(why), "failed: %s", ota_last_error());
+    diag_set_status("update", why);
+    net_power_save(true);
+    set_light(LEDS_ERROR, PROMPT_UPDATE_FAILED);       // "Sorry, the update did not work..."
+}
+
+/** After an update: keep the new version once it's up and online, or go back. */
+static void check_update_outcome(void)
+{
+    static bool settled;
+    if (settled) return;
+    if (ota_on_trial()) {
+        if (net_is_connected()) {
+            settled = true;
+            ota_confirm();
+            diag_set_status("update", "updated to this version");
+            prompts_say_always(PROMPT_UPDATE_DONE);    // "I have been updated..."
+        } else if (esp_timer_get_time() > 5LL * 60 * 1000000 && net_has_credentials()) {
+            prompts_say_always(PROMPT_UPDATE_FAILED);
+            audio_wait_idle(8000);
+            ota_roll_back();                           // can't reach Wi-Fi: back to the old version
+        }
+        return;
+    }
+    settled = true;
+    if (ota_take_rolled_back()) {
+        diag_set_status("update", "the last update didn't work; went back to this version");
+        prompts_say_always(PROMPT_UPDATE_FAILED);
+    } else if (ota_confirm()[0]) {
+        diag_set_status("update", "updated to this version");
+        prompts_say_always(PROMPT_UPDATE_DONE);
+    }
+}
+
 static cJSON *tool_handler(const char *name, const cJSON *args)
 {
+    if (strcmp(name, "install_update") == 0) {
+        leds_set(LEDS_THINKING);
+        cJSON *r = cJSON_CreateObject();
+        ota_status_t st;
+        ota_check(&st);
+        battery_status_t b;
+        battery_read(&b);
+        if (!st.available) {
+            cJSON_AddStringToObject(r, "error", st.needs_usb ? "This update needs one install from the web install "
+                                    "page with a USB cable." : st.ok ? "Already on the latest version." : st.why);
+        } else if (battery_on_battery() && b.present && b.percent < 25) {
+            cJSON_AddStringToObject(r, "error", "Battery too low to update safely: plug in the charger first.");
+        } else {
+            ota_request_install();             // runs once the conversation has closed
+            post(EV_END_REQUESTED);
+            cJSON_AddBoolToObject(r, "ok", true);
+            cJSON_AddStringToObject(r, "instructions", "Say only \"Okay.\" The board announces the update itself.");
+        }
+        leds_set(LEDS_LISTENING);
+        return r;
+    }
     if (strcmp(name, "end_conversation") == 0) {
         post(EV_END_REQUESTED);              // after the goodbye has played
         cJSON *r = cJSON_CreateObject();
@@ -362,6 +450,7 @@ static esp_err_t start_session(bool google_search, bool proactive, bool retry)
 void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
+    ota_init();                                // is this a new version on trial?
     diag_init();                               // capture logs for the diagnostics page
     s_events = xQueueCreate(8, sizeof(app_event_t));
 
@@ -389,6 +478,7 @@ void app_main(void)
     ESP_ERROR_CHECK(net_init());
     net_set_allow_open(settings_get_open_wifi());
     net_on_trust_change(on_wifi_trust);
+    ota_start_background_checks(net_is_connected);   // only looks; never installs by itself
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
 
     // Setup page first, so the device stays configurable even if audio fails.
@@ -463,6 +553,10 @@ void app_main(void)
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(5000)) != pdTRUE) {
             check_battery();
             check_voicepack();
+            check_update_outcome();
+            if (device_free() && ota_take_install_request()) {
+                do_update();                           // asked for on the diagnostics page
+            }
             if (battery_saver()) {
                 continue;                              // Wi-Fi is off on purpose: nothing to report
             }
@@ -571,6 +665,7 @@ void app_main(void)
             diag_set_status("gemini", "idle (last conversation ended normally)");
             ESP_LOGI(TAG, "conversation ended");
             back_to_listening();
+            if (ota_take_install_request()) do_update();   // "Jarvis, update yourself"
             break;
         case EV_SESSION_FAILED: {
             char why[224];

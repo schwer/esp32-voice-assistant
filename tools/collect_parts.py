@@ -4,6 +4,7 @@
 
 Usage: collect_parts.py <build_dir> <out_dir>
 """
+import hashlib
 import json
 import shutil
 import sys
@@ -24,7 +25,8 @@ for offset, rel in sorted(args["flash_files"].items(), key=lambda kv: int(kv[0],
     if off < NVS_END and end > NVS_OFFSET:
         sys.exit(f"{rel} at {offset} overlaps the NVS partition; refusing to publish it")
     shutil.copy(src, out / src.name)
-    parts.append({"path": f"firmware/{src.name}", "offset": off, "size": src.stat().st_size})
+    sha = hashlib.sha256(src.read_bytes()).hexdigest()
+    parts.append({"path": f"firmware/{src.name}", "offset": off, "size": src.stat().st_size, "sha256": sha})
     print(f"{offset:>10}  {src.name}  ({src.stat().st_size} bytes)")
 
 names = [Path(p["path"]).name for p in parts]

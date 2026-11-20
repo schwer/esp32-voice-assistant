@@ -2,7 +2,11 @@
 # nvs holds Wi-Fi and settings: keep its offset and size fixed across releases.
 nvs,        data, nvs,      0x9000,   0x6000
 phy_init,   data, phy,      0xf000,   0x1000
-factory,    app,  factory,  0x10000,  0x600000
-model,      data, spiffs,   ,         0x300000
-# Saved conversations + messages recorded in Gemini's voice (two sets during a voice change)
-storage,    data, littlefs, ,         0x600000
+# Which of the two firmware slots to boot (updates by voice write the other one).
+otadata,    data, ota,      0x10000,  0x2000
+ota_0,      app,  ota_0,    0x20000,  0x470000
+ota_1,      app,  ota_1,    0x490000, 0x470000
+# Saved conversations, alarms + messages recorded in Gemini's voice. Same place and
+# size as in the first layout, so its contents survive the move to two slots.
+storage,    data, littlefs, 0x910000, 0x600000
+model,      data, spiffs,   0xf10000, 0xf0000
