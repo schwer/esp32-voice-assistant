@@ -24,9 +24,11 @@ static const char *TAG = "audio";
 #define CHUNK_BYTES      1024
 #define PA_IDLE_OFF_MS   1500            // amp off after this much silence (no hiss, saves power)
 #define DEFAULT_VOLUME   70
-// Gemini's speech arrives over Wi-Fi in uneven bursts. Collect up to 1.5 s before speaking
-// (the lights already show he's answering) so a slow patch doesn't make him stutter.
-#define PREBUFFER_MS     1500
+// Gemini's speech arrives over Wi-Fi in uneven bursts. Hold it until the whole reply has
+// arrived, so he says it in one smooth piece (the lights already show he's answering).
+// Long answers start once 8 s is collected (or after 8 s): Gemini sends faster than he
+// speaks, so the rest keeps arriving ahead of him. The buffer holds ~16 s.
+#define PREBUFFER_MS     8000
 #define PREBUFFER_BYTES  (16000 * 2 * PREBUFFER_MS / 1000)
 
 static i2c_master_bus_handle_t s_i2c;

@@ -28,7 +28,7 @@ size_t audio_read_raw(int16_t *buf, size_t frames, int channels, uint32_t timeou
 esp_err_t audio_play_16k(const int16_t *pcm, size_t samples);
 /** Queue 24 kHz mono PCM from Gemini (resampled to 16 kHz). */
 esp_err_t audio_play(const int16_t *pcm, size_t samples);
-/** Gemini finished its reply: start playing at once instead of waiting to buffer 1.5 s. */
+/** Gemini finished its reply: play it now (until then a reply is held back, up to 8 s). */
 void audio_stream_end(void);
 /** Drop queued playback (barge-in / "interrupted"). */
 void audio_flush_playback(void);
