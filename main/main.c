@@ -101,7 +101,7 @@ static char *build_instruction(bool google_search, bool proactive)
 
     char *appts = appointments_summary(14);
     const char *tools = tools_system_instruction();
-    char update_note[200] = "", newver[48];
+    char update_note[256] = "", newver[48];
     if (ota_should_mention(newver, sizeof(newver))) {
         snprintf(update_note, sizeof(update_note),
                  "A software update for you is available (version %s). At the end of your first answer, "

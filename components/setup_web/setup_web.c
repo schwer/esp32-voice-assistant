@@ -652,7 +652,7 @@ static esp_err_t post_update_check(httpd_req_t *req)
     if (!diag_action_allowed(req)) return forbid(req);
     ota_status_t st;
     ota_check(&st);
-    char msg[220];
+    char msg[400];
     if (!st.ok) snprintf(msg, sizeof(msg), "Couldn't check: %s.", st.why);
     else if (st.available) snprintf(msg, sizeof(msg), "Version %s is available (this is %s). Press Install update to install it.", st.latest, st.current);
     else if (st.needs_usb) snprintf(msg, sizeof(msg), "Version %s is available, but %s: install it from the web install page with a USB cable.", st.latest, st.why);
