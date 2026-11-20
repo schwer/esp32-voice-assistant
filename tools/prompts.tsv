@@ -22,3 +22,6 @@ battery_low	My battery is at ten percent. Please charge me soon.
 battery_critical	My battery is almost empty. I'll turn off soon unless you charge me.
 timer_done	Your timer is done.
 alarm_ringing	Your alarm is going off.
+update_started	Updating now. I will be back in about a minute.
+update_done	I have been updated to the latest version.
+update_failed	Sorry, the update did not work. I am still on the old version.
