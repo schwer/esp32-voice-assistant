@@ -25,3 +25,4 @@ alarm_ringing	Your alarm is going off.
 update_started	Updating now. I will be back in about a minute.
 update_done	I have been updated to the latest version.
 update_failed	Sorry, the update did not work. I am still on the old version.
+update_offer	There is a software update. To install it, say Jarvis again now.
