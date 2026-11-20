@@ -160,6 +160,9 @@ Say "Jarvis, update yourself" (he checks, tells you the new version and asks bef
 use **Check for updates** / **Install update** on the diagnostics page. The board never installs
 anything on its own: it only checks twice a day, and mentions a new version once.
 
+Without Gemini (no credit or no key) it still works: when "Jarvis" can't reach Gemini and an update
+is waiting, the board says so and asks you to say "Jarvis" again to install it.
+
 How it's kept safe:
 
 - It downloads only from the HTTPS site built into the firmware (`CONFIG_VA_UPDATE_URL`, this

@@ -237,6 +237,22 @@ static void check_update_outcome(void)
     }
 }
 
+// Without Gemini (no credit, no key, Gemini down) "Jarvis" still works: if an update is
+// waiting, offer it, and a second "Jarvis" within a few seconds installs it.
+static int64_t s_offer_until;
+
+static void offer_update_if_any(void)
+{
+    ota_status_t st = ota_last_status();
+    if (!st.checked || !st.ok) ota_check(&st);
+    if (!st.available) return;
+    audio_wait_idle(10000);                            // after the "couldn't reach Gemini" message
+    prompts_say_always(PROMPT_UPDATE_OFFER);           // "...say Jarvis again now."
+    audio_wait_idle(10000);
+    s_offer_until = esp_timer_get_time() + 10LL * 1000000;
+    ESP_LOGI(TAG, "offered the update: say \"Jarvis\" in the next 10 s to install it");
+}
+
 static cJSON *tool_handler(const char *name, const cJSON *args)
 {
     if (strcmp(name, "install_update") == 0) {
@@ -610,6 +626,15 @@ void app_main(void)
             break;
         case EV_WAKE: {
             if (clock_ringing()) break;                // that "Jarvis" stopped the ringing
+            if (s_offer_until && esp_timer_get_time() < s_offer_until) {
+                s_offer_until = 0;                     // "Jarvis" again: yes, install it
+                if (ota_last_status().available) {
+                    ota_take_install_request();
+                    do_update();
+                    break;
+                }
+            }
+            s_offer_until = 0;
             ESP_LOGI(TAG, "wake: starting conversation");
             if (voicepack_busy()) {
                 voicepack_abort();                     // the user comes first; it resumes later
@@ -636,12 +661,14 @@ void app_main(void)
             if (!settings_has_api_key()) {
                 set_light(LEDS_SETUP_NEEDED, PROMPT_NEED_API_KEY);
                 back_to_listening();
+                offer_update_if_any();
                 break;
             }
             conversations_session_begin();             // audio now flows to Gemini (buffered)
             if (start_session(settings_get_search(), settings_get_proactive(), false) != ESP_OK) {
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 back_to_listening();
+                offer_update_if_any();
             }
             break;
         }
@@ -682,6 +709,7 @@ void app_main(void)
                 s_retry_stage = 0;
                 set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
                 back_to_listening();
+                offer_update_if_any();
                 break;
             }
             // Some models reject optional features in the setup: retry without them,
@@ -699,6 +727,7 @@ void app_main(void)
             s_retry_stage = 0;
             set_light(LEDS_ERROR, PROMPT_GEMINI_FAILED);
             back_to_listening();
+            offer_update_if_any();
             break;
         }
         }

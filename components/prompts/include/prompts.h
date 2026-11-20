@@ -30,7 +30,8 @@ typedef enum {
     PROMPT_ALARM_RINGING,
     PROMPT_UPDATE_STARTED,
     PROMPT_UPDATE_DONE,
-    PROMPT_UPDATE_FAILED,  // "Your alarm is going off."
+    PROMPT_UPDATE_FAILED,
+    PROMPT_UPDATE_OFFER,  // "Your alarm is going off."
     PROMPT_COUNT
 } prompt_t;
 
