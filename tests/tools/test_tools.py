@@ -66,6 +66,14 @@ def test_collect_parts_refuses_anything_overlapping_nvs(tmp_path):
     assert "NVS" in (r.stderr + r.stdout)
 
 
+def test_collect_parts_refuses_an_app_that_nearly_fills_its_slot(tmp_path):
+    big = dict(GOOD)
+    big["0x20000"] = ("esp32-voice-assistant.bin", int(0x470000 * 0.95))
+    r = run_collect(make_build(tmp_path, big), tmp_path / "out")
+    assert r.returncode != 0
+    assert "slot" in (r.stderr + r.stdout)
+
+
 def test_collect_parts_requires_the_wake_word_model(tmp_path):
     no_model = {k: v for k, v in GOOD.items() if "srmodels" not in v[0]}
     r = run_collect(make_build(tmp_path, no_model), tmp_path / "out")

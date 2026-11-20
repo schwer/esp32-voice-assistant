@@ -29,6 +29,15 @@ for offset, rel in sorted(args["flash_files"].items(), key=lambda kv: int(kv[0],
     parts.append({"path": f"firmware/{src.name}", "offset": off, "size": src.stat().st_size, "sha256": sha})
     print(f"{offset:>10}  {src.name}  ({src.stat().st_size} bytes)")
 
+# Each app must leave room to grow in its slot (two slots are needed for updates).
+csv = Path(__file__).resolve().parent.parent / "partitions.csv"
+slots = [int(c.split(",")[4], 0) for c in csv.read_text().splitlines()
+         if c.split("#")[0].strip() and c.split(",")[1].strip() == "app"]
+app = max((p for p in parts if p["offset"] in (0x10000, 0x20000)), key=lambda p: p["size"], default=None)
+if app and slots and app["size"] > 0.9 * min(slots):
+    sys.exit(f"app is {app['size']} bytes: over 90% of its {min(slots)}-byte slot. "
+             "Make it smaller or rethink partitions.csv before it stops fitting.")
+
 names = [Path(p["path"]).name for p in parts]
 if "srmodels.bin" not in names:
     sys.exit("srmodels.bin (wake word model) missing from flash_files")

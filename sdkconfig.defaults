@@ -44,3 +44,7 @@ CONFIG_MBEDTLS_HARDWARE_AES=n
 # Updates over Wi-Fi: a new version must prove itself (start, reach Wi-Fi) or the
 # board goes back to the previous one.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Optimise for size: each firmware slot is 4.4 MB (two are needed for updates over
+# Wi-Fi), and the app had grown to 98% of it.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
