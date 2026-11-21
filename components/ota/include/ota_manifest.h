@@ -18,6 +18,10 @@ typedef struct {
     char model_path[96];
     long model_size;
     char model_sha256[65];
+    char notes[400];             // what's new, as sentences ("" if none)
+    char notes_audio_path[96];   // the same, spoken (16 kHz mu-law), or ""
+    long notes_audio_size;
+    char notes_audio_sha256[65];
 } ota_manifest_t;
 
 /** Parse manifest.json. False if it has no usable "ota" section. */

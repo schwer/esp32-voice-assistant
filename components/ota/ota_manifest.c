@@ -33,6 +33,20 @@ bool ota_parse_manifest(const char *json, ota_manifest_t *out)
         size = cJSON_GetObjectItem(model, "size");
         out->model_size = cJSON_IsNumber(size) ? (long)size->valuedouble : 0;
         copy(out->model_sha256, sizeof(out->model_sha256), cJSON_GetStringValue(cJSON_GetObjectItem(model, "sha256")));
+        const cJSON *note;
+        cJSON_ArrayForEach(note, cJSON_GetObjectItem(ota, "notes")) {
+            const char *t = cJSON_GetStringValue(note);
+            if (!t || !t[0]) continue;
+            size_t used = strlen(out->notes);
+            if (used + strlen(t) + 2 >= sizeof(out->notes)) break;      // whole sentences only
+            snprintf(out->notes + used, sizeof(out->notes) - used, "%s%s", used ? " " : "", t);
+        }
+        const cJSON *audio = cJSON_GetObjectItem(ota, "notes_audio");
+        copy(out->notes_audio_path, sizeof(out->notes_audio_path), cJSON_GetStringValue(cJSON_GetObjectItem(audio, "path")));
+        size = cJSON_GetObjectItem(audio, "size");
+        out->notes_audio_size = cJSON_IsNumber(size) ? (long)size->valuedouble : 0;
+        copy(out->notes_audio_sha256, sizeof(out->notes_audio_sha256),
+             cJSON_GetStringValue(cJSON_GetObjectItem(audio, "sha256")));
     }
     cJSON_Delete(root);
     return ok;

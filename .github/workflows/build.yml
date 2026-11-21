@@ -67,10 +67,24 @@ jobs:
           name: firmware
           path: web/firmware
 
+      # "What's new", spoken: recorded in the built-in voice so the board can say it
+      # even without Gemini. Optional: if it fails, the update just has no clip.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Record "what's new"
+        continue-on-error: true
+        run: |
+          python -m pip install "piper-tts==1.8.0" "soxr==0.5.0" "scipy==1.18.1"
+          python -m piper.download_voices --data-dir voices en_US-ljspeech-high
+          printf 'notes\t%s\n' "$(python tools/whats_new.py)" > notes.tsv
+          python tools/gen_prompts.py voices/en_US-ljspeech-high.onnx notes.tsv web/firmware
+          ls -la web/firmware/notes.ulaw
+
       - name: Write manifest
         run: |
           VERSION="$(cat web/firmware/version.txt)"
-          python3 tools/write_manifest.py web/firmware/parts.json "$VERSION" "${GITHUB_SHA}" > web/manifest.json
+          python3 tools/write_manifest.py web/firmware/parts.json "$VERSION" "${GITHUB_SHA}" web/firmware/notes.ulaw > web/manifest.json
           sed -i "s/__VERSION__/${VERSION}/g" web/*.html
           cat web/manifest.json
 

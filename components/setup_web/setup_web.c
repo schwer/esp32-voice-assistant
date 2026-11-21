@@ -572,6 +572,7 @@ static esp_err_t get_diag_json(httpd_req_t *req)
     cJSON_AddStringToObject(up, "this_version", st.current);
     if (st.ok) {
         cJSON_AddStringToObject(up, "latest_version", st.latest);
+        if (st.notes[0]) cJSON_AddStringToObject(up, "whats_new", st.notes);
         cJSON_AddStringToObject(up, "status", st.available ? "update available: press Install update, or say \"Jarvis, update yourself\""
                                               : st.needs_usb ? st.why : "up to date");
     } else {
@@ -652,9 +653,11 @@ static esp_err_t post_update_check(httpd_req_t *req)
     if (!diag_action_allowed(req)) return forbid(req);
     ota_status_t st;
     ota_check(&st);
-    char msg[400];
+    char msg[800];
     if (!st.ok) snprintf(msg, sizeof(msg), "Couldn't check: %s.", st.why);
-    else if (st.available) snprintf(msg, sizeof(msg), "Version %s is available (this is %s). Press Install update to install it.", st.latest, st.current);
+    else if (st.available) snprintf(msg, sizeof(msg), "Version %s is available (this is %s). %s%s%sPress Install update to install it.",
+                                    st.latest, st.current, st.notes[0] ? "What's new: " : "", st.notes,
+                                    st.notes[0] ? " " : "");
     else if (st.needs_usb) snprintf(msg, sizeof(msg), "Version %s is available, but %s: install it from the web install page with a USB cable.", st.latest, st.why);
     else snprintf(msg, sizeof(msg), "Up to date (%s).", st.current);
     cJSON *r = cJSON_CreateObject();

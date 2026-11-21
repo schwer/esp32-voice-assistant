@@ -10,6 +10,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "cJSON.h"
 
@@ -21,6 +22,7 @@ typedef struct {
     char current[48];
     char latest[48];
     char why[120];          // plain-language reason when !ok or needs_usb
+    char notes[400];        // what's new in the latest version ("" if not said)
 } ota_status_t;
 
 /** Call early at boot (handles a version that hasn't proven itself yet). */
@@ -39,6 +41,10 @@ bool ota_take_install_request(void);
 /** Download, verify and select the new version. On ESP_OK, restart to use it. */
 esp_err_t ota_install(void (*progress)(int percent));
 const char *ota_last_error(void);
+
+/** The latest version's "what's new", spoken (16 kHz mu-law), checked against the
+ *  manifest's SHA-256. On ESP_OK the caller frees *data. ESP_ERR_NOT_FOUND if none. */
+esp_err_t ota_fetch_notes_audio(uint8_t **data, size_t *len);
 
 /** This boot is a new version on trial (not yet confirmed good). */
 bool ota_on_trial(void);

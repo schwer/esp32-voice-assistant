@@ -12,6 +12,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "esp_chip_info.h"
 #include "mbedtls/sha256.h"
 #include "nvs.h"
@@ -151,6 +152,7 @@ static esp_err_t check_locked(void)
     st.ok = true;
     strlcpy(st.latest, s_manifest.version, sizeof(st.latest));
     if (ota_is_newer(st.current, st.latest)) {
+        strlcpy(st.notes, s_manifest.notes, sizeof(st.notes));
         const esp_partition_t *model = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "model");
         char sha[65] = "";
         if (s_manifest.layout != OTA_LAYOUT || !esp_ota_get_next_update_partition(NULL)) {
@@ -330,6 +332,48 @@ esp_err_t ota_install(void (*progress)(int percent))
     return err;
 }
 
+#define NOTES_AUDIO_MAX (16000 * 40)            // 40 s is plenty for three sentences
+
+esp_err_t ota_fetch_notes_audio(uint8_t **data, size_t *len)
+{
+    *data = NULL;
+    *len = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    char url[192], want_sha[65];
+    long size = s_manifest.notes_audio_size;
+    bool have = s_manifest.notes_audio_path[0] && s_manifest.notes_audio_sha256[0] && size > 0 &&
+                size <= NOTES_AUDIO_MAX && ota_url_join(CONFIG_VA_UPDATE_URL, s_manifest.notes_audio_path, url, sizeof(url));
+    strlcpy(want_sha, s_manifest.notes_audio_sha256, sizeof(want_sha));
+    xSemaphoreGive(s_lock);
+    if (!have) return ESP_ERR_NOT_FOUND;
+
+    int64_t clen = 0;
+    esp_http_client_handle_t c = open_url(url, &clen);
+    if (!c) return ESP_FAIL;
+    uint8_t *buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+    long got = 0;
+    int n;
+    while (buf && got < size && (n = esp_http_client_read(c, (char *)buf + got, size - got)) > 0) got += n;
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    if (!buf || got != size) {
+        free(buf);
+        return ESP_FAIL;
+    }
+    uint8_t d[32];
+    char sha[65];
+    mbedtls_sha256(buf, size, d, 0);
+    hex(d, 32, sha);
+    if (strcmp(sha, want_sha) != 0) {
+        ESP_LOGW(TAG, "what's-new clip doesn't match its checksum; not playing it");
+        free(buf);
+        return ESP_ERR_INVALID_CRC;
+    }
+    *data = buf;
+    *len = size;
+    return ESP_OK;
+}
+
 // ---------------------------------------------------------------- trial runs
 
 void ota_init(void)
@@ -410,6 +454,7 @@ cJSON *ota_tool_check(void)
     }
     cJSON_AddStringToObject(r, "latest_version", st.latest);
     cJSON_AddBoolToObject(r, "update_available", st.available);
+    if (st.notes[0]) cJSON_AddStringToObject(r, "whats_new", st.notes);
     if (st.needs_usb) {
         cJSON_AddStringToObject(r, "needs_install_from_web_page", st.why);
     }

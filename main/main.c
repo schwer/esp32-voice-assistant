@@ -26,6 +26,7 @@
 #include "voicepack.h"
 #include "clock.h"
 #include "ota.h"
+#include "dsp.h"
 #include "esp_system.h"
 #include <stdlib.h>
 #include <time.h>
@@ -241,12 +242,29 @@ static void check_update_outcome(void)
 // waiting, offer it, and a second "Jarvis" within a few seconds installs it.
 static int64_t s_offer_until;
 
+/** Play the update's "what's new" (recorded in the built-in voice; no Gemini needed). */
+static void say_whats_new(void)
+{
+    uint8_t *enc;
+    size_t n;
+    if (ota_fetch_notes_audio(&enc, &n) != ESP_OK) return;
+    static int16_t pcm[1024];
+    for (size_t off = 0; off < n; off += 1024) {
+        size_t k = n - off < 1024 ? n - off : 1024;
+        for (size_t i = 0; i < k; i++) pcm[i] = dsp_ulaw_decode(enc[off + i]);
+        audio_play_16k(pcm, k);
+    }
+    free(enc);
+    audio_wait_idle(45000);
+}
+
 static void offer_update_if_any(void)
 {
     ota_status_t st = ota_last_status();
     if (!st.checked || !st.ok) ota_check(&st);
     if (!st.available) return;
     audio_wait_idle(10000);                            // after the "couldn't reach Gemini" message
+    say_whats_new();                                   // "Here's what's new in the update..."
     prompts_say_always(PROMPT_UPDATE_OFFER);           // "...say Jarvis again now."
     audio_wait_idle(10000);
     s_offer_until = esp_timer_get_time() + 10LL * 1000000;

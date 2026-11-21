@@ -108,8 +108,34 @@ def test_manifest_describes_the_update_for_the_board(tmp_path):
                         "abc1234deadbeef"], capture_output=True, text=True, check=True)
     ota = json.loads(r.stdout)["ota"]
     assert ota["layout"] == 2
+    assert 1 <= len(ota["notes"]) <= 3 and all(n.endswith((".", "!", "?")) for n in ota["notes"])
+    assert "notes_audio" not in ota                                  # no clip given
     assert ota["app"] == {"path": "firmware/esp32-voice-assistant.bin", "size": 5, "sha256": "aa"}
     assert ota["model"] == {"path": "firmware/srmodels.bin", "size": 7, "sha256": "bb"}
+
+
+def test_manifest_lists_the_spoken_whats_new_clip(tmp_path):
+    pj = tmp_path / "parts.json"
+    pj.write_text(json.dumps([{"path": "firmware/esp32-voice-assistant.bin", "offset": 0x20000, "size": 5}]))
+    clip = tmp_path / "notes.ulaw"
+    clip.write_bytes(b"\xff" * 1600)
+    r = subprocess.run([sys.executable, str(TOOLS / "write_manifest.py"), str(pj), "v", "abc1234", str(clip)],
+                       capture_output=True, text=True, check=True)
+    audio = json.loads(r.stdout)["ota"]["notes_audio"]
+    assert audio == {"path": "firmware/notes.ulaw", "size": 1600,
+                     "sha256": hashlib.sha256(b"\xff" * 1600).hexdigest()}
+
+
+def test_whats_new_reads_newest_first_and_skips_comments(tmp_path):
+    sys.path.insert(0, str(TOOLS))
+    from whats_new import items, spoken
+    f = tmp_path / "w.txt"
+    f.write_text("# comment\n\n- First change\nSecond change!\nThird.\nFourth.\n")
+    assert items(f) == ["First change.", "Second change!", "Third."]
+    assert spoken(items(f)).startswith("Here's what's new in the update. First change.")
+    assert spoken([]) == ""
+    real = items()
+    assert real and all(len(n) < 160 for n in real), "keep whats_new.txt lines short: they're spoken"
 
 
 def test_firmware_reports_the_manifest_name():

@@ -122,7 +122,8 @@ test('alarms & timers card, and Stop ringing', async ({ page }) => {
 test('software update: check, then install only after confirming', async ({ page }) => {
   const { calls } = await serve(page, DIAG_HTML(), {
     'GET /diag.json': () => ({ ...snapshot({ level: '80%' }),
-      updates: { this_version: '2026.11.17-1111111', latest_version: '2026.11.20-2222222', status: 'update available' } }),
+      updates: { this_version: '2026.11.17-1111111', latest_version: '2026.11.20-2222222', status: 'update available',
+                 whats_new: 'I can set timers. Wi-Fi is better.' } }),
     'GET /diag/leds.json': () => IDLE, 'GET /diag/messages.json': () => MESSAGES,
     'POST /diag/update-check': () => ({ ok: true, message: 'Version 2026.11.20-2222222 is available.' }),
     'POST /diag/update-install': () => ({ ok: true, message: 'Installing.' }),
@@ -130,6 +131,7 @@ test('software update: check, then install only after confirming', async ({ page
   await page.goto('http://dev/diag');
   const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Software update' }) });
   await expect(card).toContainText('2026.11.20-2222222');
+  await expect(card).toContainText('I can set timers. Wi-Fi is better.');
   await page.click('button[data-act="update-check"]');
   await expect(page.locator('#result')).toHaveText('Version 2026.11.20-2222222 is available.');
   page.removeAllListeners('dialog');                          // answer the confirmation ourselves

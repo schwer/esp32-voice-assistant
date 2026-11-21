@@ -10,7 +10,9 @@ static const char *MANIFEST =
     "\"ota\":{\"layout\":2,"
     "\"app\":{\"path\":\"firmware/esp32-voice-assistant.bin\",\"size\":4024272,\"sha256\":\"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\"},"
     "\"model\":{\"path\":\"firmware/srmodels.bin\",\"size\":291168,\"sha256\":"
-    "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}}";
+    "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"},"
+    "\"notes\":[\"I can set timers.\",\"\",\"Wi-Fi is better.\"],"
+    "\"notes_audio\":{\"path\":\"firmware/notes.ulaw\",\"size\":48000,\"sha256\":\"cc\"}}}";
 
 static void parses_the_manifest(void)
 {
@@ -22,6 +24,27 @@ static void parses_the_manifest(void)
     CHECK(!strncmp(m.app_sha256, "fedcba98", 8) && strlen(m.app_sha256) == 64);
     CHECK(!strcmp(m.model_path, "firmware/srmodels.bin") && m.model_size == 291168);
     CHECK(strlen(m.model_sha256) == 64);
+    CHECK(!strcmp(m.notes, "I can set timers. Wi-Fi is better."));
+    CHECK(!strcmp(m.notes_audio_path, "firmware/notes.ulaw") && m.notes_audio_size == 48000);
+    CHECK(!strcmp(m.notes_audio_sha256, "cc"));
+}
+
+static void notes_are_optional_and_never_overflow(void)
+{
+    ota_manifest_t m;
+    CHECK(ota_parse_manifest("{\"version\":\"2026.11.20-abc1234\",\"ota\":{\"layout\":2,"
+                             "\"app\":{\"path\":\"a.bin\"}}}", &m));
+    CHECK(m.notes[0] == 0 && m.notes_audio_path[0] == 0 && m.notes_audio_size == 0);
+    // Many long notes: whole sentences only, within the buffer.
+    char json[4096] = "{\"version\":\"2026.11.20-abc1234\",\"ota\":{\"layout\":2,\"app\":{\"path\":\"a.bin\"},\"notes\":[";
+    for (int i = 0; i < 10; i++) {
+        strcat(json, i ? ",\"" : "\"");
+        for (int j = 0; j < 150; j++) strcat(json, "x");
+        strcat(json, ".\"");
+    }
+    strcat(json, "]}}");
+    CHECK(ota_parse_manifest(json, &m));
+    CHECK(strlen(m.notes) < sizeof(m.notes) && strlen(m.notes) % 152 == 151);   // n sentences of 151 + spaces
 }
 
 static void rejects_manifests_without_an_update(void)
@@ -67,6 +90,7 @@ int main(void)
 {
     RUN(parses_the_manifest);
     RUN(rejects_manifests_without_an_update);
+    RUN(notes_are_optional_and_never_overflow);
     RUN(decides_what_is_newer);
     RUN(builds_urls_next_to_the_manifest);
     TEST_MAIN_END("ota");

@@ -160,6 +160,11 @@ Say "Jarvis, update yourself" (he checks, tells you the new version and asks bef
 use **Check for updates** / **Install update** on the diagnostics page. The board never installs
 anything on its own: it only checks twice a day, and mentions a new version once.
 
+Before installing, Jarvis says what's new: the top three lines of [`whats_new.txt`](whats_new.txt)
+(Gemini puts them in its own words; without Gemini the board plays a recording of them made when the
+installer page is published). The diagnostics page shows them too. **Add a line to `whats_new.txt`
+for every change people would notice.**
+
 Without Gemini (no credit or no key) it still works: when "Jarvis" can't reach Gemini and an update
 is waiting, the board says so and asks you to say "Jarvis" again to install it.
 

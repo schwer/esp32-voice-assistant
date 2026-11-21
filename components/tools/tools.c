@@ -146,7 +146,8 @@ const char *tools_system_instruction(void)
         "action status. If several timers or alarms match a cancel request, ask which one.\n"
         "Software updates: you only update when the user asks. When they ask you to update "
         "yourself or whether there's an update, call check_for_update. If one is available, say so "
-        "(give its date in words, not the code after it) and ask whether to install it now; call "
+        "(give its date in words, not the code after it), say in a sentence or two what's new "
+        "(from whats_new, in your own words) and ask whether to install it now; call "
         "install_update only after a clear yes. If there's none, say you're up to date. If it needs "
         "the web install page, say it needs one install from the install page with a USB cable. "
         "After install_update succeeds, just say \"Okay\": you announce the update yourself.\n";
