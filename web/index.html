@@ -331,8 +331,13 @@ async function loadManifest() {
 }
 
 function isCurrent(info, m) {
-  if (!info || info.name !== m.name || !m.build) return false;
-  const a = info.version.toLowerCase(), b = m.build.toLowerCase();
+  if (!info || info.name !== m.name) return false;
+  const a = info.version.toLowerCase();
+  // Firmware reports the full release version, e.g. "2026.11.21-13be2ae".
+  if (m.version && a === m.version.toLowerCase()) return true;
+  // Older firmware reported just the commit ("13be2ae", maybe with a suffix).
+  if (!m.build || /^\d{4}\.\d{2}\.\d{2}-/.test(a)) return false;
+  const b = m.build.toLowerCase();
   return a.startsWith(b) || b.startsWith(a);
 }
 
@@ -523,7 +528,7 @@ async function start({ eraseAll = false } = {}) {
       }
       if (!after) throw new Error(RESTART_HELP);
       if (!isCurrent(after, manifest)) {
-        throw new Error(`the board is still running ${after.version} instead of ${manifest.build}. ` +
+        throw new Error(`the board is still running ${after.version} instead of ${manifest.version}. ` +
                         "Unplug it, plug it back in and click Install again");
       }
       step(info ? `Updated to ${after.version}. Your settings were kept.` : "Installed.", "ok");

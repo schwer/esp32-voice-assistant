@@ -35,6 +35,23 @@ test('up-to-date board on Wi-Fi: shows status, no Wi-Fi form', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test('board reporting the full release version is recognised as the latest', async ({ page }) => {
+  // Firmware now reports "2026.11.15-abc1234", not just the commit (regression: it was
+  // compared with the commit only, so a successful install was reported as an error).
+  const errors = await open(page, { ssid: 'HomeNet', deviceVersion: '2026.11.15-abc1234' });
+  await page.click('#connect');
+  await expect(page.locator('#step')).toHaveText('The board already has the latest firmware.');
+  await expect(page.locator('#sFw')).toHaveText('2026.11.15-abc1234 (latest)');
+  expect(errors).toEqual([]);
+});
+
+test('an older release version is not mistaken for the latest', async ({ page }) => {
+  await open(page, { ssid: 'HomeNet', deviceVersion: '2026.11.14-abc1234' });
+  await page.click('#connect');
+  await expect(page.locator('#step')).toContainText('2026.11.14-abc1234');   // "Updating from ..."
+  await expect(page.locator('#step')).not.toHaveText('The board already has the latest firmware.');
+});
+
 test('board without Wi-Fi: network list, wrong then right password', async ({ page }) => {
   const errors = await open(page, {});
   await page.click('#connect');
