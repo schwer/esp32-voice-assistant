@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_attr.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "audio.h"
 #include "wakeword.h"
@@ -211,6 +212,30 @@ static void do_update(void)
     diag_set_status("update", why);
     net_power_save(true);
     set_light(LEDS_ERROR, PROMPT_UPDATE_FAILED);       // "Sorry, the update did not work..."
+}
+
+/**
+ * A Gemini voice session needs a free 12 KB block of internal RAM for its task (and the
+ * web server's Test Gemini runs alongside). Check there's room to spare and say so on
+ * the diagnostics page and in the log, before a conversation fails for lack of it.
+ */
+#define VOICE_SESSION_BLOCK (12 * 1024)
+#define MEMORY_MARGIN       (4 * 1024)
+
+static void check_memory(void)
+{
+    if (!wakeword_is_idle()) return;                   // measure between conversations
+    size_t free_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    bool ok = block >= VOICE_SESSION_BLOCK + MEMORY_MARGIN;
+    char s[128];
+    snprintf(s, sizeof(s), "%s: %u KB internal RAM free, largest block %u KB (a voice session needs %u KB)",
+             ok ? "ok" : "LOW, voice sessions may fail", (unsigned)(free_b / 1024), (unsigned)(block / 1024),
+             VOICE_SESSION_BLOCK / 1024);
+    diag_set_status("memory", s);
+    static bool warned;
+    if (!ok && !warned) ESP_LOGW(TAG, "memory %s", s);
+    warned = !ok;
 }
 
 /** After an update: keep the new version once it's up and online, or go back. */
@@ -611,6 +636,8 @@ void app_main(void)
             check_battery();
             check_voicepack();
             check_update_outcome();
+            static int mem_ticks;
+            if (mem_ticks++ % 12 == 0) check_memory();      // once a minute
             if (device_free() && ota_take_install_request()) {
                 do_update();                           // asked for on the diagnostics page
             }

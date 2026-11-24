@@ -281,7 +281,7 @@ esp_err_t audio_init(void)
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
     if (xTaskCreatePinnedToCoreWithCaps(play_task, "audio_play", 4096, NULL, 7, NULL, 1,
                                         MALLOC_CAP_SPIRAM) != pdPASS) {
-        xTaskCreatePinnedToCore(play_task, "audio_play", 4096, NULL, 7, NULL, 1);
+        xTaskCreatePinnedToCore(play_task, "audio_play", 4096, NULL, 7, NULL, 1);   // fallback (no PSRAM)
     }
     ESP_LOGI(TAG, "speaker ready (%d Hz)", BOARD_I2S_SAMPLE_RATE);
     return ESP_OK;

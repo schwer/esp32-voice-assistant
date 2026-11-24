@@ -237,7 +237,7 @@ esp_err_t leds_init(void)
     led_strip_clear(s_strip);
     // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
     if (xTaskCreateWithCaps(leds_task, "leds", 3072, NULL, 2, &s_task, MALLOC_CAP_SPIRAM) != pdPASS) {
-        xTaskCreate(leds_task, "leds", 3072, NULL, 2, &s_task);
+        xTaskCreate(leds_task, "leds", 3072, NULL, 2, &s_task);   // fallback (no PSRAM)
     }
     return ESP_OK;
 }

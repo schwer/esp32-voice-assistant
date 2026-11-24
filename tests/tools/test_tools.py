@@ -111,6 +111,53 @@ def test_budget_leaves_room_in_the_update_slot():
     assert budget <= 0.8 * 0x470000, "keep the budget well under the 4.4 MB update slot"
 
 
+def test_size_check_reports_and_enforces_static_internal_ram(tmp_path):
+    app = tmp_path / "app.bin"
+    app.write_bytes(b"\0" * 100)
+    mem = tmp_path / "size.json"
+    mem.write_text("Executing action: size\n" + json.dumps(
+        {"memory_types": {"DIRAM": {"used": 150000, "size": 340000}, "IRAM": {"used": 16384, "size": 16384},
+                          "RTC FAST": {"used": 100, "size": 8192}}}))
+    for limit, want in ((None, 0), (200000, 0), (160000, 1)):
+        b = tmp_path / "budget.json"
+        b.write_text(json.dumps({"app_max_bytes": 1000, "internal_ram_static_max_bytes": limit}))
+        r = subprocess.run([sys.executable, str(TOOLS / "check_size.py"), str(app), str(b), "", str(mem)],
+                           capture_output=True, text=True)
+        assert r.returncode == want, (limit, r.stdout, r.stderr)
+        assert "166,384" in r.stdout                                  # DIRAM + IRAM, not RTC
+
+
+def test_task_stacks_in_internal_ram_fit_the_budget():
+    # A Gemini voice session needs a free 12 KB block of internal RAM. Every task stack
+    # comes out of it unless created WithCaps(MALLOC_CAP_SPIRAM); see tools/ram_budget.py.
+    sys.path.insert(0, str(TOOLS))
+    from ram_budget import stacks
+    found = stacks()
+    total = sum(s for _, _, s in found)
+    budget = json.loads((ROOT / "firmware_budget.json").read_text())["internal_task_stacks_max_bytes"]
+    listing = "\n".join(f"{s:6d} {n} ({w})" for w, n, s in sorted(found, key=lambda x: -x[2]))
+    assert total <= budget, f"task stacks in internal RAM: {total} > {budget} bytes\n{listing}"
+    names = {n for _, n, _ in found}
+    assert {"afe_feed", "task_stack", "CONFIG_ESP_MAIN_TASK_STACK_SIZE"} <= names   # the counter still sees them
+    assert "leds" not in names and "audio_play" not in names                       # PSRAM stacks don't count
+
+
+def test_stack_counter_reads_calls_fields_and_skips_psram_and_fallbacks(tmp_path):
+    sys.path.insert(0, str(TOOLS))
+    from ram_budget import stacks
+    (tmp_path / "components/x").mkdir(parents=True)
+    (tmp_path / "main").mkdir()
+    (tmp_path / "components/x/x.c").write_text(
+        'xTaskCreate(a, "a", 4 * 1024, NULL, 1, NULL);\n'
+        'xTaskCreatePinnedToCore(b, "b", 2048, NULL, 1, NULL, 0);\n'
+        'xTaskCreateWithCaps(c, "c", 9000, NULL, 1, NULL, MALLOC_CAP_SPIRAM);\n'
+        'xTaskCreate(c, "c", 9000, NULL, 1, NULL);   // fallback (no PSRAM)\n'
+        '    .task_stack = 12 * 1024,\n')
+    (tmp_path / "sdkconfig.defaults").write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n")
+    got = {n: s for _, n, s in stacks(tmp_path)}
+    assert got == {"a": 4096, "b": 2048, "task_stack": 12288, "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 8192}
+
+
 # ---------------------------------------------------------------- write_manifest.py
 
 def test_manifest_format(tmp_path):

@@ -364,7 +364,7 @@ esp_err_t net_init(void)
     // Stack in PSRAM: internal RAM is scarce, and this task never writes flash
     // (the saved-network list is written by the callers of net_provision/add/forget).
     if (xTaskCreateWithCaps(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task, MALLOC_CAP_SPIRAM) != pdPASS) {
-        xTaskCreate(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task);
+        xTaskCreate(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task);   // fallback (no PSRAM)
     }
     return ESP_OK;
 }
