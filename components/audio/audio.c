@@ -5,6 +5,7 @@
 #include "freertos/stream_buffer.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include <math.h>
 #include "driver/i2s_std.h"
 #include "driver/i2s_tdm.h"
@@ -277,7 +278,11 @@ esp_err_t audio_init(void)
     s_play = storage ? xStreamBufferCreateStatic(PLAY_BUF_BYTES, 1, storage, &sb) : NULL;
     if (!s_play) return ESP_ERR_NO_MEM;
 
-    xTaskCreatePinnedToCore(play_task, "audio_play", 4096, NULL, 7, NULL, 1);
+    // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
+    if (xTaskCreatePinnedToCoreWithCaps(play_task, "audio_play", 4096, NULL, 7, NULL, 1,
+                                        MALLOC_CAP_SPIRAM) != pdPASS) {
+        xTaskCreatePinnedToCore(play_task, "audio_play", 4096, NULL, 7, NULL, 1);
+    }
     ESP_LOGI(TAG, "speaker ready (%d Hz)", BOARD_I2S_SAMPLE_RATE);
     return ESP_OK;
 }

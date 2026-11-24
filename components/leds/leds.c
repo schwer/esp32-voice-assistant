@@ -5,6 +5,8 @@
 #include "freertos/task.h"
 #include "freertos/timers.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include "led_strip.h"
 #include "board.h"
 #include "leds.h"
@@ -233,7 +235,10 @@ esp_err_t leds_init(void)
         return err;
     }
     led_strip_clear(s_strip);
-    xTaskCreate(leds_task, "leds", 3072, NULL, 2, &s_task);
+    // Stack in PSRAM: internal RAM is scarce, and this task never touches flash.
+    if (xTaskCreateWithCaps(leds_task, "leds", 3072, NULL, 2, &s_task, MALLOC_CAP_SPIRAM) != pdPASS) {
+        xTaskCreate(leds_task, "leds", 3072, NULL, 2, &s_task);
+    }
     return ESP_OK;
 }
 

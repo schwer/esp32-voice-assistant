@@ -13,6 +13,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
@@ -359,7 +361,11 @@ esp_err_t net_init(void)
         drv.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
         esp_wifi_set_config(WIFI_IF_STA, &drv);
     }
-    xTaskCreate(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task);
+    // Stack in PSRAM: internal RAM is scarce, and this task never writes flash
+    // (the saved-network list is written by the callers of net_provision/add/forget).
+    if (xTaskCreateWithCaps(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task, MALLOC_CAP_SPIRAM) != pdPASS) {
+        xTaskCreate(roam_task, "wifi_roam", 4096, NULL, 4, &s_roam_task);
+    }
     return ESP_OK;
 }
 

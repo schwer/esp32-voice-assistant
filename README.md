@@ -40,7 +40,7 @@ There's no phone app and no cloud backend of your own.
   memory keep working. The card is never formatted; Diagnostics > Storage shows its status.
 - **Updates by voice**: "Jarvis, is there an update?" / "Jarvis, update yourself". It only ever
   installs when you ask (or press Install update on the diagnostics page) and says when it starts,
-  when it's done, or that it didn't work. It mentions a new version once, at the end of an answer.
+  when it's done, or that it didn't work.
   See [Updates over Wi-Fi](#updates-over-wi-fi).
 - **Battery saver**: on battery, Wi-Fi turns off after 3 quiet minutes and back on at "Jarvis"
   (your first words are buffered meanwhile); the radio dozes whenever idle. See [docs/power.md](docs/power.md).
@@ -165,7 +165,8 @@ Not affiliated with or endorsed by Google. "Gemini" is a trademark of Google LLC
 
 Say "Jarvis, update yourself" (he checks, tells you the new version and asks before installing) or
 use **Check for updates** / **Install update** on the diagnostics page. The board never installs
-anything on its own: it only checks twice a day, and mentions a new version once.
+anything on its own, and for now it doesn't check by itself either (that saves memory): ask it,
+or press Check for updates.
 
 Before installing, Jarvis says what's new: the top three lines of [`whats_new.txt`](whats_new.txt)
 (Gemini puts them in its own words; without Gemini the board plays a recording of them made when the

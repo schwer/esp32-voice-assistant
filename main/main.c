@@ -528,7 +528,8 @@ void app_main(void)
     ESP_ERROR_CHECK(net_init());
     net_set_allow_open(settings_get_open_wifi());
     net_on_trust_change(on_wifi_trust);
-    ota_start_background_checks(net_is_connected);   // only looks; never installs by itself
+    // No automatic update checks for now (frees a task's RAM). Updates still work on
+    // request: "Jarvis, update yourself" or Check for updates / Install update.
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher
 
     // Setup page first, so the device stays configurable even if audio fails.
