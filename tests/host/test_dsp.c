@@ -165,6 +165,77 @@ static void take_check_rejects_rambling_and_empty_takes(void)
     CHECK(!dsp_take_plausible(long_line, 25.0f));
 }
 
+static size_t read_file(const char *path, void *buf, size_t cap)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(buf, 1, cap, f);
+    fclose(f);
+    return n;
+}
+
+static double snr_db(const int16_t *ref, const int16_t *got, size_t n)
+{
+    double sig = 0, err = 0;
+    for (size_t i = 0; i < n; i++) {
+        sig += (double)ref[i] * ref[i];
+        err += (double)(ref[i] - got[i]) * (ref[i] - got[i]);
+    }
+    return 10 * log10(sig / (err + 1e-9));
+}
+
+static void adpcm_matches_the_python_encoder_byte_for_byte(void)
+{
+    // fixtures/adpcm was written by tools/adpcm.py --fixture: the clips the build
+    // makes in Python must decode on the board exactly as intended.
+    static int16_t pcm[16000], back[16000];
+    static uint8_t py[8000], c[8000];
+    size_t np = read_file("fixtures/adpcm/sweep.pcm", pcm, sizeof(pcm)) / 2;
+    size_t nb = read_file("fixtures/adpcm/sweep.adpcm", py, sizeof(py));
+    CHECK(np == 16000 && nb == 8000);
+    dsp_adpcm_t s;
+    dsp_adpcm_reset(&s);
+    CHECK(dsp_adpcm_encode(&s, pcm, np, c) == nb);
+    CHECK(memcmp(c, py, nb) == 0);
+    dsp_adpcm_reset(&s);
+    CHECK(dsp_adpcm_decode(&s, py, nb, back) == np);
+    CHECK(snr_db(pcm, back, 9600) > 20);               // the tones (before the square-wave burst)
+}
+
+static void adpcm_decodes_in_chunks_like_one_block(void)
+{
+    static int16_t pcm[4000], whole[4000], parts[4000];
+    static uint8_t enc[2000];
+    for (int i = 0; i < 4000; i++) pcm[i] = (int16_t)(12000 * sin(i * 0.07) + 4000 * sin(i * 0.9));
+    dsp_adpcm_t s;
+    dsp_adpcm_reset(&s);
+    size_t nb = dsp_adpcm_encode(&s, pcm, 4000, enc);
+    dsp_adpcm_reset(&s);
+    dsp_adpcm_decode(&s, enc, nb, whole);
+    dsp_adpcm_reset(&s);
+    size_t got = 0;
+    for (size_t off = 0; off < nb; off += 333) {
+        size_t k = nb - off < 333 ? nb - off : 333;
+        got += dsp_adpcm_decode(&s, enc + off, k, parts + got);
+    }
+    CHECK(got == 4000 && memcmp(whole, parts, sizeof(whole)) == 0);
+    CHECK(snr_db(pcm, whole, 4000) > 18);
+}
+
+static void adpcm_survives_extremes(void)
+{
+    static int16_t pcm[1000], back[1000];
+    static uint8_t enc[500];
+    for (int i = 0; i < 1000; i++) pcm[i] = (i / 4) % 2 ? 32767 : -32768;   // full-scale square
+    dsp_adpcm_t s;
+    dsp_adpcm_reset(&s);
+    dsp_adpcm_encode(&s, pcm, 1000, enc);
+    CHECK(s.index >= 0 && s.index <= 88);
+    dsp_adpcm_reset(&s);
+    dsp_adpcm_decode(&s, enc, 500, back);            // no overflow (UBSan would catch it)
+    CHECK(s.index >= 0 && s.index <= 88);
+}
+
 int main(void)
 {
     RUN(resampler_produces_two_thirds);
@@ -172,6 +243,9 @@ int main(void)
     RUN(resampler_reset_clears_state);
     RUN(ulaw_round_trip_is_close_for_every_value);
     RUN(ulaw_snr_matches_g711);
+    RUN(adpcm_matches_the_python_encoder_byte_for_byte);
+    RUN(adpcm_decodes_in_chunks_like_one_block);
+    RUN(adpcm_survives_extremes);
     RUN(speakerize_sets_loudness_and_limits_peaks);
     RUN(speakerize_removes_bass_the_speaker_cannot_play);
     RUN(tidy_trims_silence_and_fades);

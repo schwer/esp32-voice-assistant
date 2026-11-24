@@ -251,7 +251,7 @@ def test_phrase_list_enum_ids_and_clips_agree():
     assert sorted(ids) == sorted(table), "tools/prompts.tsv and IDS[] differ"
     assert clips == table, "CMakeLists clip list must follow the enum order"
     for pid in table:
-        assert (ROOT / f"components/prompts/clips/{pid}.ulaw").exists(), f"missing clip {pid}.ulaw"
+        assert (ROOT / f"components/prompts/clips/{pid}.adpcm").exists(), f"missing clip {pid}.adpcm"
     assert (ROOT / "components/prompts/clips/voice.txt").exists()
 
 
@@ -276,11 +276,19 @@ def test_ulaw_encoder_matches_the_firmware():
     assert (ulaw_encode(values.astype(np.int16)) == expected).all()
 
 
-def test_clips_are_16khz_mono_ulaw_of_reasonable_length():
+def test_adpcm_fixture_is_what_the_python_encoder_writes(tmp_path):
+    # tests/host/test_dsp.c checks the C encoder against this fixture byte for byte.
+    subprocess.run([sys.executable, str(TOOLS / "adpcm.py"), "--fixture", str(tmp_path)], check=True)
+    for name in ("sweep.pcm", "sweep.adpcm"):
+        assert (tmp_path / name).read_bytes() == (ROOT / "tests/host/fixtures/adpcm" / name).read_bytes()
+
+
+def test_clips_are_16khz_mono_adpcm_of_reasonable_length():
     for pid in tsv_ids():
-        n = (ROOT / f"components/prompts/clips/{pid}.ulaw").stat().st_size
+        n = (ROOT / f"components/prompts/clips/{pid}.adpcm").stat().st_size
         assert not (ROOT / f"components/prompts/clips/{pid}.pcm").exists()
-        seconds = n / 16000
+        assert not (ROOT / f"components/prompts/clips/{pid}.ulaw").exists()
+        seconds = n * 2 / 16000
         assert 0.3 < seconds < 12, f"{pid}: {seconds:.1f} s"
 
 

@@ -25,6 +25,7 @@ from scipy.signal import butter, sosfiltfilt, lfilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ulaw import ulaw_encode  # noqa: E402
+from adpcm import encode as adpcm_encode  # noqa: E402
 
 TARGET_RATE = 16000
 TAIL_S = 0.08
@@ -85,6 +86,9 @@ def trim(audio: np.ndarray, thresh: float = 0.01) -> np.ndarray:
 
 def main() -> None:
     model, tsv, out_dir = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+    # Built-in clips: IMA ADPCM (4 bits/sample, smallest firmware). "ulaw": 8-bit mu-law
+    # (the spoken "what's new" that boards download and play).
+    fmt = sys.argv[4] if len(sys.argv) > 4 else "adpcm"
     out_dir.mkdir(parents=True, exist_ok=True)
     voice = PiperVoice.load(model)
     total = 0
@@ -98,10 +102,14 @@ def main() -> None:
         audio[-fade:] *= np.linspace(1, 0, fade)
         audio = np.concatenate([audio, np.zeros(int(TAIL_S * TARGET_RATE), dtype=np.float32)])
         pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
-        enc = ulaw_encode(pcm)                        # 8 bits per sample: half the firmware space
-        (out_dir / f"{pid}.ulaw").write_bytes(enc.tobytes())
+        if fmt == "ulaw":
+            data = ulaw_encode(pcm).tobytes()
+        else:
+            data = adpcm_encode(pcm.tolist())
+            (out_dir / f"{pid}.ulaw").unlink(missing_ok=True)
+        (out_dir / f"{pid}.{fmt}").write_bytes(data)
         (out_dir / f"{pid}.pcm").unlink(missing_ok=True)
-        total += enc.nbytes
+        total += len(data)
         print(f"{pid:16s} {len(pcm) / TARGET_RATE:5.2f}s  {text}")
     print(f"total {total / 1024:.0f} KB")
 

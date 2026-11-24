@@ -55,3 +55,9 @@ CONFIG_FATFS_MAX_LFN=255
 
 # Size: IPv6 isn't needed (home Wi-Fi, Google and GitHub all work over IPv4).
 CONFIG_LWIP_IPV6=n
+
+# Internal RAM is scarce (each Gemini session needs a 12 KB task stack from it, and
+# "Error create websocket task" was seen): let static buffers marked EXT_RAM_BSS_ATTR
+# and Wi-Fi/lwIP buffers live in PSRAM.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

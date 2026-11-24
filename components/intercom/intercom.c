@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "audio.h"
 #include "dsp.h"
@@ -40,7 +41,7 @@ static int s_last_id;
 static char s_text[INTERCOM_TEXT_BYTES + 1];
 static int16_t *s_cap;
 static volatile size_t s_cap_len;
-static int16_t s_chime[16000 * 36 / 100];      // two soft notes, 0.36 s
+EXT_RAM_BSS_ATTR static int16_t s_chime[16000 * 36 / 100];   // two soft notes, 0.36 s (PSRAM: internal RAM is scarce)
 
 // ---------------------------------------------------------------- index on flash
 
@@ -133,8 +134,8 @@ static void play_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return;
-    static uint8_t enc[1024];
-    static int16_t pcm[1024];
+    EXT_RAM_BSS_ATTR static uint8_t enc[1024];
+    EXT_RAM_BSS_ATTR static int16_t pcm[1024];
     size_t n;
     while ((n = fread(enc, 1, sizeof(enc), f)) > 0) {
         for (size_t i = 0; i < n; i++) pcm[i] = dsp_ulaw_decode(enc[i]);

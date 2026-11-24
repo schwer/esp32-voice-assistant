@@ -29,6 +29,18 @@ uint8_t dsp_ulaw_encode(int16_t pcm);
 int16_t dsp_ulaw_decode(uint8_t u);
 
 /**
+ * IMA ADPCM, 4 bits per sample (two per byte, first sample in the low nibble), one
+ * continuous stream starting from predictor 0, step index 0. Used for the built-in
+ * voice clips; tools/adpcm.py encodes exactly the same way.
+ */
+typedef struct { int32_t predictor; int index; } dsp_adpcm_t;
+void dsp_adpcm_reset(dsp_adpcm_t *s);
+/** Encode n samples (n even) into n/2 bytes. Returns bytes written. */
+size_t dsp_adpcm_encode(dsp_adpcm_t *s, const int16_t *pcm, size_t n, uint8_t *out);
+/** Decode `bytes` bytes into 2*bytes samples. Returns samples written. */
+size_t dsp_adpcm_decode(dsp_adpcm_t *s, const uint8_t *in, size_t bytes, int16_t *out);
+
+/**
  * Make speech clear on the board's small speaker (same as tools/gen_prompts.py):
  * 150 Hz high-pass, +3 dB at 3 kHz, speech loudness to -13 dBFS, soft limiter.
  * In place, no allocation.

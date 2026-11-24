@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "audio.h"
 #include "settings.h"
 #include "prompts.h"
@@ -14,64 +15,64 @@
 static const char *TAG = "prompts";
 
 // Raw 16 kHz mono s16le clips embedded from components/prompts/clips/
-extern const uint8_t ready_pcm_start[] asm("_binary_ready_ulaw_start");
-extern const uint8_t ready_pcm_end[]   asm("_binary_ready_ulaw_end");
-extern const uint8_t need_wifi_pcm_start[] asm("_binary_need_wifi_ulaw_start");
-extern const uint8_t need_wifi_pcm_end[]   asm("_binary_need_wifi_ulaw_end");
-extern const uint8_t need_api_key_pcm_start[] asm("_binary_need_api_key_ulaw_start");
-extern const uint8_t need_api_key_pcm_end[]   asm("_binary_need_api_key_ulaw_end");
-extern const uint8_t wifi_lost_pcm_start[] asm("_binary_wifi_lost_ulaw_start");
-extern const uint8_t wifi_lost_pcm_end[]   asm("_binary_wifi_lost_ulaw_end");
-extern const uint8_t wifi_back_pcm_start[] asm("_binary_wifi_back_ulaw_start");
-extern const uint8_t wifi_back_pcm_end[]   asm("_binary_wifi_back_ulaw_end");
-extern const uint8_t no_internet_pcm_start[] asm("_binary_no_internet_ulaw_start");
-extern const uint8_t no_internet_pcm_end[]   asm("_binary_no_internet_ulaw_end");
-extern const uint8_t gemini_failed_pcm_start[] asm("_binary_gemini_failed_ulaw_start");
-extern const uint8_t gemini_failed_pcm_end[]   asm("_binary_gemini_failed_ulaw_end");
-extern const uint8_t saved_pcm_start[] asm("_binary_saved_ulaw_start");
-extern const uint8_t saved_pcm_end[]   asm("_binary_saved_ulaw_end");
-extern const uint8_t settings_saved_pcm_start[] asm("_binary_settings_saved_ulaw_start");
-extern const uint8_t settings_saved_pcm_end[]   asm("_binary_settings_saved_ulaw_end");
-extern const uint8_t deleted_pcm_start[] asm("_binary_deleted_ulaw_start");
-extern const uint8_t deleted_pcm_end[]   asm("_binary_deleted_ulaw_end");
-extern const uint8_t error_pcm_start[] asm("_binary_error_ulaw_start");
-extern const uint8_t error_pcm_end[]   asm("_binary_error_ulaw_end");
-extern const uint8_t speaker_test_pcm_start[] asm("_binary_speaker_test_ulaw_start");
-extern const uint8_t speaker_test_pcm_end[]   asm("_binary_speaker_test_ulaw_end");
+extern const uint8_t ready_pcm_start[] asm("_binary_ready_adpcm_start");
+extern const uint8_t ready_pcm_end[]   asm("_binary_ready_adpcm_end");
+extern const uint8_t need_wifi_pcm_start[] asm("_binary_need_wifi_adpcm_start");
+extern const uint8_t need_wifi_pcm_end[]   asm("_binary_need_wifi_adpcm_end");
+extern const uint8_t need_api_key_pcm_start[] asm("_binary_need_api_key_adpcm_start");
+extern const uint8_t need_api_key_pcm_end[]   asm("_binary_need_api_key_adpcm_end");
+extern const uint8_t wifi_lost_pcm_start[] asm("_binary_wifi_lost_adpcm_start");
+extern const uint8_t wifi_lost_pcm_end[]   asm("_binary_wifi_lost_adpcm_end");
+extern const uint8_t wifi_back_pcm_start[] asm("_binary_wifi_back_adpcm_start");
+extern const uint8_t wifi_back_pcm_end[]   asm("_binary_wifi_back_adpcm_end");
+extern const uint8_t no_internet_pcm_start[] asm("_binary_no_internet_adpcm_start");
+extern const uint8_t no_internet_pcm_end[]   asm("_binary_no_internet_adpcm_end");
+extern const uint8_t gemini_failed_pcm_start[] asm("_binary_gemini_failed_adpcm_start");
+extern const uint8_t gemini_failed_pcm_end[]   asm("_binary_gemini_failed_adpcm_end");
+extern const uint8_t saved_pcm_start[] asm("_binary_saved_adpcm_start");
+extern const uint8_t saved_pcm_end[]   asm("_binary_saved_adpcm_end");
+extern const uint8_t settings_saved_pcm_start[] asm("_binary_settings_saved_adpcm_start");
+extern const uint8_t settings_saved_pcm_end[]   asm("_binary_settings_saved_adpcm_end");
+extern const uint8_t deleted_pcm_start[] asm("_binary_deleted_adpcm_start");
+extern const uint8_t deleted_pcm_end[]   asm("_binary_deleted_adpcm_end");
+extern const uint8_t error_pcm_start[] asm("_binary_error_adpcm_start");
+extern const uint8_t error_pcm_end[]   asm("_binary_error_adpcm_end");
+extern const uint8_t speaker_test_pcm_start[] asm("_binary_speaker_test_adpcm_start");
+extern const uint8_t speaker_test_pcm_end[]   asm("_binary_speaker_test_adpcm_end");
 
-extern const uint8_t wake_ack_1_pcm_start[] asm("_binary_wake_ack_1_ulaw_start");
-extern const uint8_t wake_ack_1_pcm_end[]   asm("_binary_wake_ack_1_ulaw_end");
-extern const uint8_t wake_ack_2_pcm_start[] asm("_binary_wake_ack_2_ulaw_start");
-extern const uint8_t wake_ack_2_pcm_end[]   asm("_binary_wake_ack_2_ulaw_end");
-extern const uint8_t wake_ack_3_pcm_start[] asm("_binary_wake_ack_3_ulaw_start");
-extern const uint8_t wake_ack_3_pcm_end[]   asm("_binary_wake_ack_3_ulaw_end");
-extern const uint8_t not_ready_pcm_start[] asm("_binary_not_ready_ulaw_start");
-extern const uint8_t not_ready_pcm_end[]   asm("_binary_not_ready_ulaw_end");
+extern const uint8_t wake_ack_1_pcm_start[] asm("_binary_wake_ack_1_adpcm_start");
+extern const uint8_t wake_ack_1_pcm_end[]   asm("_binary_wake_ack_1_adpcm_end");
+extern const uint8_t wake_ack_2_pcm_start[] asm("_binary_wake_ack_2_adpcm_start");
+extern const uint8_t wake_ack_2_pcm_end[]   asm("_binary_wake_ack_2_adpcm_end");
+extern const uint8_t wake_ack_3_pcm_start[] asm("_binary_wake_ack_3_adpcm_start");
+extern const uint8_t wake_ack_3_pcm_end[]   asm("_binary_wake_ack_3_adpcm_end");
+extern const uint8_t not_ready_pcm_start[] asm("_binary_not_ready_adpcm_start");
+extern const uint8_t not_ready_pcm_end[]   asm("_binary_not_ready_adpcm_end");
 
-extern const uint8_t mic_test_start_pcm_start[] asm("_binary_mic_test_start_ulaw_start");
-extern const uint8_t mic_test_start_pcm_end[]   asm("_binary_mic_test_start_ulaw_end");
-extern const uint8_t mic_test_hello_pcm_start[] asm("_binary_mic_test_hello_ulaw_start");
-extern const uint8_t mic_test_hello_pcm_end[]   asm("_binary_mic_test_hello_ulaw_end");
-extern const uint8_t mic_test_nothing_pcm_start[] asm("_binary_mic_test_nothing_ulaw_start");
-extern const uint8_t mic_test_nothing_pcm_end[]   asm("_binary_mic_test_nothing_ulaw_end");
+extern const uint8_t mic_test_start_pcm_start[] asm("_binary_mic_test_start_adpcm_start");
+extern const uint8_t mic_test_start_pcm_end[]   asm("_binary_mic_test_start_adpcm_end");
+extern const uint8_t mic_test_hello_pcm_start[] asm("_binary_mic_test_hello_adpcm_start");
+extern const uint8_t mic_test_hello_pcm_end[]   asm("_binary_mic_test_hello_adpcm_end");
+extern const uint8_t mic_test_nothing_pcm_start[] asm("_binary_mic_test_nothing_adpcm_start");
+extern const uint8_t mic_test_nothing_pcm_end[]   asm("_binary_mic_test_nothing_adpcm_end");
 
-extern const uint8_t battery_low_pcm_start[] asm("_binary_battery_low_ulaw_start");
-extern const uint8_t battery_low_pcm_end[]   asm("_binary_battery_low_ulaw_end");
-extern const uint8_t battery_critical_pcm_start[] asm("_binary_battery_critical_ulaw_start");
-extern const uint8_t battery_critical_pcm_end[]   asm("_binary_battery_critical_ulaw_end");
+extern const uint8_t battery_low_pcm_start[] asm("_binary_battery_low_adpcm_start");
+extern const uint8_t battery_low_pcm_end[]   asm("_binary_battery_low_adpcm_end");
+extern const uint8_t battery_critical_pcm_start[] asm("_binary_battery_critical_adpcm_start");
+extern const uint8_t battery_critical_pcm_end[]   asm("_binary_battery_critical_adpcm_end");
 
-extern const uint8_t timer_done_pcm_start[] asm("_binary_timer_done_ulaw_start");
-extern const uint8_t timer_done_pcm_end[]   asm("_binary_timer_done_ulaw_end");
-extern const uint8_t alarm_ringing_pcm_start[] asm("_binary_alarm_ringing_ulaw_start");
-extern const uint8_t alarm_ringing_pcm_end[]   asm("_binary_alarm_ringing_ulaw_end");
-extern const uint8_t update_started_pcm_start[] asm("_binary_update_started_ulaw_start");
-extern const uint8_t update_started_pcm_end[]   asm("_binary_update_started_ulaw_end");
-extern const uint8_t update_done_pcm_start[] asm("_binary_update_done_ulaw_start");
-extern const uint8_t update_done_pcm_end[]   asm("_binary_update_done_ulaw_end");
-extern const uint8_t update_failed_pcm_start[] asm("_binary_update_failed_ulaw_start");
-extern const uint8_t update_failed_pcm_end[]   asm("_binary_update_failed_ulaw_end");
-extern const uint8_t update_offer_pcm_start[] asm("_binary_update_offer_ulaw_start");
-extern const uint8_t update_offer_pcm_end[]   asm("_binary_update_offer_ulaw_end");
+extern const uint8_t timer_done_pcm_start[] asm("_binary_timer_done_adpcm_start");
+extern const uint8_t timer_done_pcm_end[]   asm("_binary_timer_done_adpcm_end");
+extern const uint8_t alarm_ringing_pcm_start[] asm("_binary_alarm_ringing_adpcm_start");
+extern const uint8_t alarm_ringing_pcm_end[]   asm("_binary_alarm_ringing_adpcm_end");
+extern const uint8_t update_started_pcm_start[] asm("_binary_update_started_adpcm_start");
+extern const uint8_t update_started_pcm_end[]   asm("_binary_update_started_adpcm_end");
+extern const uint8_t update_done_pcm_start[] asm("_binary_update_done_adpcm_start");
+extern const uint8_t update_done_pcm_end[]   asm("_binary_update_done_adpcm_end");
+extern const uint8_t update_failed_pcm_start[] asm("_binary_update_failed_adpcm_start");
+extern const uint8_t update_failed_pcm_end[]   asm("_binary_update_failed_adpcm_end");
+extern const uint8_t update_offer_pcm_start[] asm("_binary_update_offer_adpcm_start");
+extern const uint8_t update_offer_pcm_end[]   asm("_binary_update_offer_adpcm_end");
 
 static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { ready_pcm_start, ready_pcm_end },
@@ -187,8 +188,8 @@ static bool play_recorded(prompt_t p)
     prompts_recorded_path(s_recorded_dir, p, path, sizeof(path));
     FILE *f = fopen(path, "rb");
     if (!f) return false;
-    static uint8_t enc[1024];
-    static int16_t pcm[1024];
+    EXT_RAM_BSS_ATTR static uint8_t enc[1024];
+    EXT_RAM_BSS_ATTR static int16_t pcm[1024];
     size_t n, total = 0;
     while ((n = fread(enc, 1, sizeof(enc), f)) > 0) {
         for (size_t i = 0; i < n; i++) pcm[i] = dsp_ulaw_decode(enc[i]);   // stored at 8 bits/sample to fit two voices
@@ -206,15 +207,16 @@ static void prompts_task(void *arg)
     for (;;) {
         xQueueReceive(s_queue, &p, portMAX_DELAY);
         if (play_recorded(p)) continue;
-        // Built-in clips are mu-law (8 bits/sample) to keep the firmware small.
-        static int16_t pcm[1024];
+        // Built-in clips are IMA ADPCM (4 bits/sample) to keep the firmware small.
+        EXT_RAM_BSS_ATTR static int16_t pcm[1024];
         const uint8_t *enc = CLIPS[p].start;
-        size_t samples = (size_t)(CLIPS[p].end - CLIPS[p].start);
-        ESP_LOGI(TAG, "say %s (built-in %s, %.1f s)", IDS[p], prompts_builtin_voice(), samples / 16000.0f);
-        for (size_t off = 0; off < samples; off += 1024) {
-            size_t n = samples - off < 1024 ? samples - off : 1024;
-            for (size_t i = 0; i < n; i++) pcm[i] = dsp_ulaw_decode(enc[off + i]);
-            audio_play_16k(pcm, n);
+        size_t bytes = (size_t)(CLIPS[p].end - CLIPS[p].start);
+        ESP_LOGI(TAG, "say %s (built-in %s, %.1f s)", IDS[p], prompts_builtin_voice(), bytes * 2 / 16000.0f);
+        dsp_adpcm_t st;
+        dsp_adpcm_reset(&st);
+        for (size_t off = 0; off < bytes; off += 512) {
+            size_t n = bytes - off < 512 ? bytes - off : 512;
+            audio_play_16k(pcm, dsp_adpcm_decode(&st, enc + off, n, pcm));
         }
     }
 }

@@ -5,6 +5,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "audio.h"
@@ -250,7 +251,7 @@ static void say_whats_new(void)
     uint8_t *enc;
     size_t n;
     if (ota_fetch_notes_audio(&enc, &n) != ESP_OK) return;
-    static int16_t pcm[1024];
+    EXT_RAM_BSS_ATTR static int16_t pcm[1024];
     for (size_t off = 0; off < n; off += 1024) {
         size_t k = n - off < 1024 ? n - off : 1024;
         for (size_t i = 0; i < k; i++) pcm[i] = dsp_ulaw_decode(enc[off + i]);

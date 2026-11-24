@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "audio.h"
 #include "prompts.h"
@@ -125,7 +126,7 @@ static void load_alarms(void)
 
 // ---------------------------------------------------------------- ringing
 
-static int16_t s_beep[16000 * 15 / 100];          // 150 ms, 880 Hz, faded edges
+EXT_RAM_BSS_ATTR static int16_t s_beep[16000 * 15 / 100];   // 150 ms, 880 Hz (PSRAM: internal RAM is scarce)
 
 static void make_beep(void)
 {

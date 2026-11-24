@@ -82,7 +82,7 @@ jobs:
           python -m pip install "piper-tts==1.8.0" "soxr==0.5.0" "scipy==1.18.1"
           python -m piper.download_voices --data-dir voices en_US-ljspeech-high
           printf 'notes\t%s\n' "$(python tools/whats_new.py)" > notes.tsv
-          python tools/gen_prompts.py voices/en_US-ljspeech-high.onnx notes.tsv web/firmware
+          python tools/gen_prompts.py voices/en_US-ljspeech-high.onnx notes.tsv web/firmware ulaw
           ls -la web/firmware/notes.ulaw
 
       - name: Write manifest

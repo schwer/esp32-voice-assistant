@@ -373,7 +373,13 @@ static const char *live_test(const char *key, char *why, size_t why_len, float *
         .on_turn_complete = live_turn,
     };
     int64_t t0 = esp_timer_get_time();
-    if (gemini_live_start(&cfg) != ESP_OK) return "Couldn't start a voice session (out of memory?).";
+    if (gemini_live_start(&cfg) != ESP_OK) {
+        snprintf(why, why_len, "Couldn't start a voice session: out of internal memory (%u KB free, largest "
+                 "block %u KB). Restart the board and try again.",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
+        return why;
+    }
     const char *res = NULL;
     // 1. Connect and set up, as a conversation does.
     while (!s_live_ready && !s_live_failed) {
