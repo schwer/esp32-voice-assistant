@@ -52,3 +52,6 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # microSD card (FAT): long file names for recordings like need_api_key.ulaw.
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+
+# Size: IPv6 isn't needed (home Wi-Fi, Google and GitHub all work over IPv4).
+CONFIG_LWIP_IPV6=n

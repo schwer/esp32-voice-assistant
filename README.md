@@ -137,6 +137,7 @@ CI (`.github/workflows/test.yml`) runs on every push and pull request:
 | Suite | What it covers | Run locally |
 |---|---|---|
 | Host unit tests (C) | Audio maths (resampler, mu-law, speaker processing, trimming), battery estimator, Improv protocol, setup-page helpers, alarm scheduling (repeats, daylight saving) and stopwatch, and Gemini Live messages: what the firmware sends, plus whole server conversations replayed from `tests/host/fixtures/gemini` (hand-written in the API's message shapes; no API key needed). Built with AddressSanitizer + UBSan. | `make -C tests/host` |
+| Firmware size (CI) | The build fails if the firmware is over `firmware_budget.json` (3.25 MiB); each build's summary shows the size and a per-component breakdown. Raise the budget only on purpose: conversation history and recordings need the board's memory. | `python3 tools/check_size.py build/esp32-voice-assistant.bin firmware_budget.json` |
 | Tool checks (Python) | Firmware parts never overlap NVS, manifest format, partition table, phrase list / enum / clips stay in sync | `python -m pytest tests/tools` |
 | Browser tests (Playwright) | Installer against a simulated board (Improv over Web Serial), diagnostics page, setup page's recording progress | `cd tests/web && npm ci && npx playwright install chromium && npx playwright test` |
 

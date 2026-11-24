@@ -1,0 +1,4 @@
+{
+  "app_max_bytes": 3407872,
+  "note": "Largest firmware image allowed (3.25 MiB). The build fails above it. Raise it only on purpose, in its own reviewed change: conversation history and recordings need the board's memory, and each update slot is 4.4 MB."
+}

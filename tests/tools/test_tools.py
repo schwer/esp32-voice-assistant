@@ -5,6 +5,7 @@ Run: python -m pytest tests/tools
 """
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -79,6 +80,35 @@ def test_collect_parts_requires_the_wake_word_model(tmp_path):
     r = run_collect(make_build(tmp_path, no_model), tmp_path / "out")
     assert r.returncode != 0
     assert "srmodels" in (r.stderr + r.stdout)
+
+
+# ---------------------------------------------------------------- check_size.py
+
+def run_size(tmp: Path, size: int, budget: int):
+    app = tmp / "app.bin"
+    app.write_bytes(b"\0" * size)
+    b = tmp / "budget.json"
+    b.write_text(json.dumps({"app_max_bytes": budget}))
+    env = dict(os.environ, GITHUB_STEP_SUMMARY=str(tmp / "summary.md"))
+    return subprocess.run([sys.executable, str(TOOLS / "check_size.py"), str(app), str(b)],
+                          capture_output=True, text=True, env=env)
+
+
+def test_size_check_passes_within_budget_and_writes_a_summary(tmp_path):
+    r = run_size(tmp_path, 1000, 2000)
+    assert r.returncode == 0, r.stderr
+    assert "Within budget" in (tmp_path / "summary.md").read_text()
+
+
+def test_size_check_fails_over_budget(tmp_path):
+    r = run_size(tmp_path, 2001, 2000)
+    assert r.returncode != 0
+    assert "over its budget" in r.stderr
+
+
+def test_budget_leaves_room_in_the_update_slot():
+    budget = json.loads((ROOT / "firmware_budget.json").read_text())["app_max_bytes"]
+    assert budget <= 0.8 * 0x470000, "keep the budget well under the 4.4 MB update slot"
 
 
 # ---------------------------------------------------------------- write_manifest.py

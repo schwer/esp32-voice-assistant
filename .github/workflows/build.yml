@@ -30,7 +30,11 @@ jobs:
         with:
           esp_idf_version: v5.5
           target: esp32s3
-          command: idf.py build
+          command: idf.py build && idf.py size-components > build/size_components.txt
+
+      # Keep the firmware small: fail above firmware_budget.json, report what takes space.
+      - name: Check firmware size
+        run: python3 tools/check_size.py build/esp32-voice-assistant.bin firmware_budget.json build/size_components.txt
 
       # Flash images are published as separate parts at their own offsets.
       # Never as one merged image: that would also overwrite the NVS partition
