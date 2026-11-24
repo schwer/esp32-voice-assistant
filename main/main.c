@@ -26,6 +26,7 @@
 #include "voicepack.h"
 #include "clock.h"
 #include "ota.h"
+#include "intercom.h"
 #include "dsp.h"
 #include "esp_system.h"
 #include <stdlib.h>
@@ -407,9 +408,15 @@ static void check_voicepack(void)
     }
 }
 
+/** The intercom may use Gemini and the speaker: not in a conversation, test or alarm. */
+static bool intercom_can_start(void)
+{
+    return wakeword_is_idle() && !clock_ringing();
+}
+
 static bool device_free(void)
 {
-    return wakeword_is_idle() && !clock_ringing();     // not in a conversation, self-test or alarm
+    return wakeword_is_idle() && !clock_ringing() && !intercom_busy();   // not talking, testing, ringing or announcing
 }
 
 // Interruptions are paused until reboot if Gemini keeps hearing itself (echo
@@ -554,6 +561,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(appointments_init());
     clock_init(on_ring);                       // timers, alarms (saved on flash), stopwatch
+    intercom_set_gate(intercom_can_start);
+    if (intercom_init() != ESP_OK) ESP_LOGW(TAG, "intercom unavailable");
 
     // Wake word needs the microphones.
     wakeword_config_t wcfg = { .on_wake = on_wake, .on_audio = on_audio };
@@ -654,6 +663,10 @@ void app_main(void)
             }
             s_offer_until = 0;
             ESP_LOGI(TAG, "wake: starting conversation");
+            if (intercom_busy()) {
+                intercom_abort();                      // someone wants to talk: drop the announcement
+                for (int i = 0; i < 80 && intercom_busy(); i++) vTaskDelay(pdMS_TO_TICKS(50));
+            }
             if (voicepack_busy()) {
                 voicepack_abort();                     // the user comes first; it resumes later
                 for (int i = 0; i < 60 && voicepack_busy(); i++) vTaskDelay(pdMS_TO_TICKS(50));

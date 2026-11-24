@@ -1,6 +1,7 @@
 # What's new, in plain words, newest first: one short sentence per line.
 # Jarvis reads the top three when he offers an update (and the diagnostics page
 # shows them), so add a line for every change people would notice.
+There's an Intercom page: type a message and I'll announce it out loud.
 I can tell you what's in an update before you install it.
 You can update me by voice, even without Gemini credit, and I go back to the old version by myself if an update goes wrong.
 I can join your phone's hotspot and free Wi-Fi, and remember up to five networks.

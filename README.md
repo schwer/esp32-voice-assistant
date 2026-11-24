@@ -32,6 +32,9 @@ There's no phone app and no cloud backend of your own.
   whichever is around. Optionally uses free Wi-Fi with no password, but only if it really reaches
   the internet (networks that want you to click "Accept" on a page are skipped), and the setup page
   switches itself off on public networks.
+- **Intercom**: on the board's Intercom page (linked from Diagnostics), type a message and Jarvis
+  announces it after a chime, in his Gemini voice. The last 10 are kept as audio, so **Say again**
+  replays one instantly, even without Gemini. "Jarvis, what was the last message?" works too.
 - **Updates by voice**: "Jarvis, is there an update?" / "Jarvis, update yourself". It only ever
   installs when you ask (or press Install update on the diagnostics page) and says when it starts,
   when it's done, or that it didn't work. It mentions a new version once, at the end of an answer.

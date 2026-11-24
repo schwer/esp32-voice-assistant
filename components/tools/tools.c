@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "esp_log.h"
 #include "tools.h"
 #include "appointments.h"
@@ -10,6 +11,7 @@
 #include "settings.h"
 #include "clock.h"
 #include "ota.h"
+#include "intercom.h"
 
 static const char *TAG = "tools";
 
@@ -88,6 +90,11 @@ cJSON *tools_declarations(void)
              "The device's own battery: charge level, voltage, whether it's charging, estimated "
              "time left and what can be said about battery health. Use for any question about "
              "your battery, power, charging or how long you'll last.",
+             NULL, NULL, 0);
+
+    function(decls, "get_intercom_messages",
+             "Recent intercom announcements typed on the Intercom page (newest first, with times). "
+             "Use when someone asks what the last message or announcement was.",
              NULL, NULL, 0);
 
     function(decls, "check_for_update",
@@ -172,6 +179,22 @@ cJSON *tools_handle_call(const char *name, const cJSON *args)
 {
     ESP_LOGI(TAG, "tool call: %s", name);
 
+    if (strcmp(name, "get_intercom_messages") == 0) {
+        // Readable local times for Gemini instead of Unix timestamps; no ids.
+        cJSON *r = intercom_list();
+        cJSON *m;
+        cJSON_ArrayForEach(m, cJSON_GetObjectItem(r, "messages")) {
+            time_t t = (time_t)cJSON_GetNumberValue(cJSON_GetObjectItem(m, "time"));
+            char when[40] = "unknown time";
+            struct tm tm;
+            if (t > 1600000000 && localtime_r(&t, &tm)) strftime(when, sizeof(when), "%A %d %B, %H:%M", &tm);
+            cJSON_DeleteItemFromObject(m, "time");
+            cJSON_DeleteItemFromObject(m, "id");
+            cJSON_DeleteItemFromObject(m, "seconds");
+            cJSON_AddStringToObject(m, "when", when);
+        }
+        return r;
+    }
     if (strcmp(name, "check_for_update") == 0) {
         return ota_tool_check();
     }

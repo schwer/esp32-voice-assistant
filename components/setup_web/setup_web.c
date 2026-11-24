@@ -29,6 +29,8 @@
 #include "voicepack.h"
 #include "clock.h"
 #include "ota.h"
+#include "intercom.h"
+#include "intercom_page.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_system.h"
@@ -684,6 +686,62 @@ static esp_err_t post_update_install(httpd_req_t *req)
     return send_json(req, r);
 }
 
+// ---------- intercom
+
+static esp_err_t get_intercom(httpd_req_t *req)
+{
+    s_last_activity_us = esp_timer_get_time();
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, INTERCOM_PAGE, sizeof(INTERCOM_PAGE) - 1);
+}
+
+static esp_err_t intercom_reply(httpd_req_t *req, esp_err_t err, const char *fail_msg)
+{
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", err == ESP_OK);
+    if (err != ESP_OK) cJSON_AddStringToObject(r, "message", fail_msg);
+    return send_json(req, r);
+}
+
+static esp_err_t post_intercom_say(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    s_last_activity_us = esp_timer_get_time();
+    char body[INTERCOM_TEXT_BYTES * 3 + 16], text[INTERCOM_TEXT_BYTES + 1] = "";
+    if (!read_form(req, body, sizeof(body))) return ESP_FAIL;
+    form_field(body, "text", text, sizeof(text));
+    esp_err_t err = intercom_say(text);
+    return intercom_reply(req, err, err == ESP_ERR_INVALID_ARG ? "Type a message of up to 300 characters."
+                                                                : "Jarvis is still busy with the last message.");
+}
+
+static int form_id(httpd_req_t *req)
+{
+    char body[32], v[12] = "";
+    if (!read_form(req, body, sizeof(body))) return -1;
+    form_field(body, "id", v, sizeof(v));
+    return atoi(v);
+}
+
+static esp_err_t post_intercom_replay(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    esp_err_t err = intercom_replay(form_id(req));
+    return intercom_reply(req, err, err == ESP_ERR_NOT_FOUND ? "That message is gone." : "Jarvis is busy. Try again in a moment.");
+}
+
+static esp_err_t post_intercom_delete(httpd_req_t *req)
+{
+    if (!diag_action_allowed(req)) return forbid(req);
+    esp_err_t err = intercom_delete(form_id(req));
+    if (err == ESP_OK) leds_event(LEDS_EVENT_DELETED);
+    return intercom_reply(req, err, "That message is gone.");
+}
+
+static esp_err_t get_intercom_status(httpd_req_t *req) { return send_json(req, intercom_status()); }
+static esp_err_t get_intercom_messages(httpd_req_t *req) { return send_json(req, intercom_list()); }
+
 static esp_err_t post_stop_ringing(httpd_req_t *req)
 {
     if (!diag_action_allowed(req)) return forbid(req);
@@ -849,7 +907,7 @@ esp_err_t setup_web_start(void)
     cfg.stack_size = 10240;              // the API key test does a TLS handshake here
     cfg.lru_purge_enable = true;         // a new browser connection closes the oldest idle one
     cfg.max_open_sockets = 5;            // leave sockets for Gemini, weather, time and mDNS
-    cfg.max_uri_handlers = 32;
+    cfg.max_uri_handlers = 40;
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
         return err;
@@ -869,6 +927,12 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag/stop-ringing",.method = HTTP_POST, .handler = post_stop_ringing },
         { .uri = "/diag/update-check",.method = HTTP_POST, .handler = post_update_check },
         { .uri = "/diag/update-install",.method = HTTP_POST, .handler = post_update_install },
+        { .uri = "/intercom",         .method = HTTP_GET,  .handler = get_intercom },
+        { .uri = "/intercom/say",     .method = HTTP_POST, .handler = post_intercom_say },
+        { .uri = "/intercom/replay",  .method = HTTP_POST, .handler = post_intercom_replay },
+        { .uri = "/intercom/delete",  .method = HTTP_POST, .handler = post_intercom_delete },
+        { .uri = "/intercom/status",  .method = HTTP_GET,  .handler = get_intercom_status },
+        { .uri = "/intercom/messages.json", .method = HTTP_GET, .handler = get_intercom_messages },
         { .uri = "/wifi/add",         .method = HTTP_POST, .handler = post_wifi_add },
         { .uri = "/wifi/forget",      .method = HTTP_POST, .handler = post_wifi_forget },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
