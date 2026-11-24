@@ -147,12 +147,14 @@ bool batt_est_slope(const batt_est_t *e, int minutes, float *out)
 
 bool batt_est_on_battery(const batt_est_t *e)
 {
+    // When in doubt, say "plugged in": the battery saver only turns Wi-Fi off on
+    // clear evidence of running down, never on a plugged-in board.
     if (e->avg_v == 0) return false;
     float slope;
     if (batt_est_slope(e, 15, &slope)) {
-        if (slope > 0.01f) return false;                          // charging
-        if (e->avg_v >= 4.15f && slope > -0.01f) return false;    // full, on USB power
-        return true;
+        if (slope > 0.005f) return false;                         // charging
+        if (e->avg_v >= 4.10f && slope > -0.03f) return false;    // (nearly) full, held by the charger
+        return true;                                              // steady or falling: discharging
     }
-    return e->avg_v < 4.10f;            // no history yet: below full charge = on battery
+    return e->avg_v < 3.60f;            // no trend yet (first 15 min): only a nearly flat battery counts
 }

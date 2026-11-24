@@ -148,6 +148,37 @@ static void trend_and_on_battery(void)
     CHECK(!batt_est_on_battery(&e));                          // full on USB power
 }
 
+static void plugged_in_is_the_default_when_unsure(void)
+{
+    batt_est_t e;
+    int64_t t = 0;
+    // Just started, half-charged battery on a charger: no trend yet -> plugged in
+    // (regression: this used to count as "on battery", so Wi-Fi went off while plugged in).
+    batt_est_reset(&e);
+    for (int i = 0; i < 12 * 5; i++, t += S(5)) batt_est_update(&e, 3.85f, false, t);
+    CHECK(!batt_est_on_battery(&e));
+    // ...but a nearly flat battery with no trend yet is on battery.
+    batt_est_reset(&e);
+    t = 0;
+    for (int i = 0; i < 12 * 5; i++, t += S(5)) batt_est_update(&e, 3.50f, false, t);
+    CHECK(batt_est_on_battery(&e));
+    // Charging slowly from half: rising -> plugged in.
+    batt_est_reset(&e);
+    t = 0;
+    for (int i = 0; i < 12 * 30; i++, t += S(5)) batt_est_update(&e, 3.80f + 0.00004f * i, false, t);
+    CHECK(!batt_est_on_battery(&e));
+    // Nearly full, held by the charger with a little wobble -> plugged in.
+    batt_est_reset(&e);
+    t = 0;
+    for (int i = 0; i < 12 * 30; i++, t += S(5)) batt_est_update(&e, 4.12f + ((i / 12) % 2 ? 0.003f : 0), false, t);
+    CHECK(!batt_est_on_battery(&e));
+    // Slow discharge in the flat middle of the curve (about 0.02 V/h) -> on battery.
+    batt_est_reset(&e);
+    t = 0;
+    for (int i = 0; i < 12 * 30; i++, t += S(5)) batt_est_update(&e, 3.80f - 0.0000278f * i, false, t);
+    CHECK(batt_est_on_battery(&e));
+}
+
 int main(void)
 {
     RUN(trimmed_mean_ignores_spikes);
@@ -160,5 +191,6 @@ int main(void)
     RUN(noise_is_smoothed_and_level_never_rises_while_discharging);
     RUN(charging_raises_the_level);
     RUN(trend_and_on_battery);
+    RUN(plugged_in_is_the_default_when_unsure);
     TEST_MAIN_END("battery");
 }

@@ -10,6 +10,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "nvs.h"
+#include "driver/usb_serial_jtag.h"
 #include "battery.h"
 #include "battery_est.h"
 
@@ -145,6 +146,9 @@ void battery_read(battery_status_t *out)
 bool battery_on_battery(void)
 {
     if (!s_lock) return false;
+    // A computer on the USB port means external power for sure (it sends USB frames).
+    // A wall charger doesn't, so then the battery's voltage trend decides.
+    if (usb_serial_jtag_is_connected()) return false;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool on = s_st.present && batt_est_on_battery(&s_est);
     xSemaphoreGive(s_lock);
