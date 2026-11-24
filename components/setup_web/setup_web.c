@@ -306,7 +306,7 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
     send_escaped(req, settings_get_model());
-    SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini API key</em> "
+    SEND(req, "\"><p class=note>Leave as is unless Google retires it. Use <em>Test Gemini</em> "
               "on the diagnostics page to check it.</p>");
 
     SEND(req, "<label class=check><input type=checkbox name=barge value=1");

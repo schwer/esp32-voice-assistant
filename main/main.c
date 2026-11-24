@@ -415,6 +415,12 @@ static bool intercom_can_start(void)
     return wakeword_is_idle() && !clock_ringing();
 }
 
+/** Gemini is in use: a conversation, a self-test, voice recording or the intercom. */
+static bool gemini_in_use(void)
+{
+    return !wakeword_is_idle() || intercom_busy() || voicepack_busy();
+}
+
 static bool device_free(void)
 {
     return wakeword_is_idle() && !clock_ringing() && !intercom_busy();   // not talking, testing, ringing or announcing
@@ -494,6 +500,7 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ota_init();                                // is this a new version on trial?
     diag_init();                               // capture logs for the diagnostics page
+    diag_set_busy_check(gemini_in_use);        // the Gemini test waits its turn
     s_events = xQueueCreate(8, sizeof(app_event_t));
 
     ESP_ERROR_CHECK(settings_init());

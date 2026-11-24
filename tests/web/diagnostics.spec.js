@@ -144,3 +144,24 @@ test('software update: check, then install only after confirming', async ({ page
   await expect(page.locator('#result')).toHaveText('Installing.');
   expect(calls.find((c) => c.key === 'POST /diag/update-install').headers['x-assistant']).toBe('1');
 });
+
+test('Gemini test: shows the live voice step result, good or bad', async ({ page }) => {
+  let ok = false;
+  await serve(page, DIAG_HTML(), {
+    'GET /diag.json': () => snapshot({ level: '80%' }),
+    'GET /diag/leds.json': () => IDLE, 'GET /diag/messages.json': () => MESSAGES,
+    'POST /diag/test-gemini': () => (ok
+      ? { ok: true, step: 'live', message: 'Works: the key is valid, and the model answered a live voice test.' }
+      : { ok: false, step: 'live', message: 'The API key and model are valid, but the live voice test failed: '
+                                            + 'Google refused because of the account: credits depleted.' }),
+  });
+  await page.goto('http://dev/diag');
+  await expect(page.getByRole('button', { name: 'Test Gemini' })).toBeVisible();
+  await page.click('button[data-act="test-gemini"]');
+  await expect(page.locator('#result')).toContainText('live voice test failed');
+  await expect(page.locator('#result')).toHaveClass('bad');
+  ok = true;
+  await page.click('button[data-act="test-gemini"]');
+  await expect(page.locator('#result')).toHaveText(/^Works:/);
+  await expect(page.locator('#result')).toHaveClass('ok');
+});

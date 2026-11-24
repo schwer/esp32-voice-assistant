@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Diagnostics: recent log capture, module status, and a JSON health snapshot.
 #pragma once
+#include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
 #include "cJSON.h"
@@ -17,5 +18,11 @@ cJSON *diag_snapshot(void);
 /** Copy recent log text into buf (NUL-terminated). Returns bytes copied. */
 size_t diag_logs(char *buf, size_t len);
 
-/** Check the saved API key against Google: {"ok":bool,"http_status":N,"message":"..."} */
+/**
+ * Check Gemini end to end: the key and model (REST), then a real Live voice session
+ * like a conversation's, with a short prompt, waiting for spoken audio back (not
+ * played). {"ok":bool,"http_status":N,"step":"key|live","message":"..."}. Blocks ~2-20 s.
+ */
 cJSON *diag_test_gemini(void);
+/** Set by the app: true while Gemini is in use (conversation, recording, intercom). */
+void diag_set_busy_check(bool (*busy)(void));

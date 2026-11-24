@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 #include <time.h>
@@ -18,6 +19,9 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "settings.h"
+#include "gemini_live.h"
+#include "gemini_proto.h"
+#include "freertos/semphr.h"
 #include "net.h"
 #include "storage.h"
 #include "conversations.h"
@@ -323,6 +327,82 @@ static cJSON *result(bool ok, int status, const char *msg)
     return r;
 }
 
+// ---- live voice test: a real Gemini Live session with a one-word prompt
+
+static bool (*s_busy)(void);
+void diag_set_busy_check(bool (*busy)(void)) { s_busy = busy; }
+
+static SemaphoreHandle_t s_live_sem;
+static volatile bool s_live_ready, s_live_failed, s_live_turn;
+static volatile size_t s_live_samples;
+
+static void live_state(gemini_state_t st, void *ctx)
+{
+    if (st == GEMINI_STATE_READY) {
+        s_live_ready = true;
+        xSemaphoreGive(s_live_sem);
+    } else if (st == GEMINI_STATE_ERROR || st == GEMINI_STATE_CLOSED) {
+        s_live_failed = true;
+        xSemaphoreGive(s_live_sem);
+    }
+}
+
+static void live_audio(const int16_t *pcm, size_t n, void *ctx) { s_live_samples += n; }   // not played
+
+static void live_turn(void *ctx)
+{
+    s_live_turn = true;
+    xSemaphoreGive(s_live_sem);
+}
+
+/** Returns NULL on success (and fills secs), else a reason (static or `why`). */
+static const char *live_test(const char *key, char *why, size_t why_len, float *secs, float *took)
+{
+    if (s_busy && s_busy()) return "Jarvis is busy (in a conversation, recording or announcing). Try again in a moment.";
+    if (!s_live_sem) s_live_sem = xSemaphoreCreateBinary();
+    s_live_ready = s_live_failed = s_live_turn = false;
+    s_live_samples = 0;
+    xSemaphoreTake(s_live_sem, 0);
+    gemini_live_config_t cfg = {
+        .api_key = key,
+        .model = settings_get_model(),
+        .voice = settings_get_voice(),
+        .system_instruction = "This is a connection test. Reply with the single word: OK.",
+        .on_state = live_state,
+        .on_audio_out = live_audio,
+        .on_turn_complete = live_turn,
+    };
+    int64_t t0 = esp_timer_get_time();
+    if (gemini_live_start(&cfg) != ESP_OK) return "Couldn't start a voice session (out of memory?).";
+    const char *res = NULL;
+    // 1. Connect and set up, as a conversation does.
+    while (!s_live_ready && !s_live_failed) {
+        if (xSemaphoreTake(s_live_sem, pdMS_TO_TICKS(15000)) != pdTRUE) { res = "No answer from Gemini Live within 15 s."; break; }
+    }
+    // 2. One short prompt; wait for spoken audio and the end of the turn.
+    if (!res && !s_live_failed) {
+        if (gemini_live_send_text("Say OK.") != ESP_OK) res = "Couldn't send the test prompt.";
+        while (!res && !s_live_turn && !s_live_failed) {
+            if (xSemaphoreTake(s_live_sem, pdMS_TO_TICKS(20000)) != pdTRUE) { res = "Gemini Live didn't answer the test prompt within 20 s."; break; }
+        }
+    }
+    if (!res && s_live_failed) {
+        const char *err = gemini_live_last_error();
+        if (gemini_error_is_account(err)) {
+            snprintf(why, why_len, "Google refused because of the account: %s. Check Billing in AI Studio "
+                     "(aistudio.google.com).", err);
+        } else {
+            snprintf(why, why_len, "%s", err[0] ? err : "the connection closed");
+        }
+        res = why;
+    }
+    if (!res && s_live_samples == 0) res = "Gemini Live answered, but without any speech.";
+    gemini_live_stop();
+    *secs = s_live_samples / 24000.0f;
+    *took = (esp_timer_get_time() - t0) / 1e6f;
+    return res;
+}
+
 cJSON *diag_test_gemini(void)
 {
     char key[SETTINGS_API_KEY_MAX];
@@ -339,6 +419,7 @@ cJSON *diag_test_gemini(void)
     }
 
     char url[160];
+    char *live_key = strdup(key);           // for step 2; wiped below
     snprintf(url, sizeof(url), "https://generativelanguage.googleapis.com/v1beta/models/%s",
              settings_get_model());
     esp_http_client_config_t cfg = {
@@ -353,6 +434,9 @@ cJSON *diag_test_gemini(void)
     esp_http_client_cleanup(c);
     memset(key, 0, sizeof(key));
 
+    if (err != ESP_OK || status != 200) {
+        if (live_key) { memset(live_key, 0, strlen(live_key)); free(live_key); }
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Gemini check failed: %s", esp_err_to_name(err));
         return result(false, 0, "Couldn't reach Google (network, DNS or TLS problem). "
@@ -361,11 +445,25 @@ cJSON *diag_test_gemini(void)
     ESP_LOGI(TAG, "Gemini check: HTTP %d", status);
     switch (status) {
     case 200: {
-        char msg[288];
-        snprintf(msg, sizeof(msg), "The API key is valid and the model \"%s\" is available. (This test can't "
-                 "see whether the account has credit left: if conversations fail, check the Gemini line "
-                 "under Modules.)", settings_get_model());
-        return result(true, status, msg);
+        // Step 2: the key and model exist; now try a real voice session (this is what
+        // fails when the account is out of credit, or the model doesn't do Live audio).
+        char why[220] = "", msg[400];
+        float secs = 0, took = 0;
+        const char *fail = live_key ? live_test(live_key, why, sizeof(why), &secs, &took) : "Out of memory.";
+        if (live_key) { memset(live_key, 0, strlen(live_key)); free(live_key); }
+        ESP_LOGI(TAG, "Gemini live test: %s", fail ? fail : "ok");
+        if (fail) {
+            snprintf(msg, sizeof(msg), "The API key and model \"%s\" are valid, but the live voice test failed: %s",
+                     settings_get_model(), fail);
+            cJSON *r = result(false, status, msg);
+            cJSON_AddStringToObject(r, "step", "live");
+            return r;
+        }
+        snprintf(msg, sizeof(msg), "Works: the key is valid, and the model \"%s\" answered a live voice test "
+                 "(%.1f s of speech, %.1f s to answer).", settings_get_model(), secs, took);
+        cJSON *r = result(true, status, msg);
+        cJSON_AddStringToObject(r, "step", "live");
+        return r;
     }
     case 404: {
         char msg[160];

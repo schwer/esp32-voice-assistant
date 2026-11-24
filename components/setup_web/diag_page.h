@@ -37,7 +37,7 @@ static const char DIAG_PAGE[] =
 "<p id=batline style='font-weight:600;margin:6px 0 0'></p>"
 "<p class=muted id=updated>Loading&hellip;</p>"
 "<div class='card'><h2>Tests</h2>"
-"<button class=primary data-act='test-gemini'>Test Gemini API key</button>"
+"<button class=primary data-act='test-gemini'>Test Gemini</button>"
 
 "<button data-act='speaker-test'>Test speaker</button>"
 "<button data-act='mic-test'>Test microphone</button>"
