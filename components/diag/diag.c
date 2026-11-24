@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_idf_version.h"
@@ -168,6 +169,7 @@ cJSON *diag_snapshot(void)
 
     // Memory
     cJSON *mem = add_obj(root, "memory");
+    cJSON_AddNumberToObject(mem, "internal_total_kb", heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024);
     cJSON_AddNumberToObject(mem, "internal_free_kb", heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
     cJSON_AddNumberToObject(mem, "internal_min_free_kb", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024);
     cJSON_AddNumberToObject(mem, "internal_largest_block_kb", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
@@ -178,6 +180,28 @@ cJSON *diag_snapshot(void)
     char socks[24];
     snprintf(socks, sizeof(socks), "%d of %d", sn, smax);
     cJSON_AddStringToObject(mem, "network_sockets_in_use", socks);
+    // Spare stack per task (bytes never used), smallest first: shows where RAM could be trimmed.
+    UBaseType_t nt = uxTaskGetNumberOfTasks();
+    TaskStatus_t *ts = heap_caps_malloc(nt * sizeof(TaskStatus_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ts) {
+        nt = uxTaskGetSystemState(ts, nt, NULL);
+        for (UBaseType_t i = 0; i < nt; i++) {           // sort by spare stack
+            for (UBaseType_t j = i + 1; j < nt; j++) {
+                if (ts[j].usStackHighWaterMark < ts[i].usStackHighWaterMark) {
+                    TaskStatus_t t = ts[i]; ts[i] = ts[j]; ts[j] = t;
+                }
+            }
+        }
+        char *list = calloc(1, 1024);
+        for (UBaseType_t i = 0; list && i < nt; i++) {
+            size_t used = strlen(list);
+            snprintf(list + used, 1024 - used, "%s%s %u", i ? ", " : "", ts[i].pcTaskName,
+                     (unsigned)ts[i].usStackHighWaterMark);
+        }
+        if (list) cJSON_AddStringToObject(mem, "spare_stack_bytes", list);
+        free(list);
+        free(ts);
+    }
 
     // Wi-Fi
     cJSON *wifi = add_obj(root, "wifi");

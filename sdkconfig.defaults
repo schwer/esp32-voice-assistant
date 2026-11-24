@@ -64,3 +64,15 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Let some long-running tasks keep their stacks in PSRAM (only tasks that never
 # write flash: speaker playback, LEDs, Wi-Fi search).
 CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
+
+# Internal RAM for voice sessions: keep Wi-Fi/lwIP code in flash instead of IRAM
+# (IRAM and DRAM share the same SRAM on the ESP32-S3; ~30 KB). Voice audio needs
+# ~50 KB/s, far below what these speed-ups are for.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_ESP_WIFI_SLP_IRAM_OPT=n
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+# Per-task spare stack on the diagnostics page.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
