@@ -38,3 +38,11 @@
 // Mic audio goes to the AFE and Gemini at 16 kHz as-is; Gemini's 24 kHz
 // output is resampled 3:2 down to 16 kHz before playback.
 #define BOARD_I2S_SAMPLE_RATE   16000
+
+// microSD slot: SDMMC, 1 data line. From a community pin map derived from Waveshare's
+// demo code and schematic (github.com/jensenbox/waveshare-esp32-s3-audio); verify on
+// the schematic. DAT3 is on the IO expander and must be high for SD mode.
+#define BOARD_SD_CLK            40
+#define BOARD_SD_CMD            42
+#define BOARD_SD_D0             41
+#define BOARD_EXP_SD_D3         3

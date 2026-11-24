@@ -76,9 +76,43 @@ static void save_index(cJSON *a)
     free(json);
 }
 
-static void audio_path(int id, char *buf, size_t len)
+/** Where a new message's audio goes: the microSD card if there is one, else flash. */
+static void new_audio_path(int id, char *buf, size_t len)
 {
-    snprintf(buf, len, DIR "/%d.ulaw", id);
+    if (storage_sd_ready()) {
+        mkdir(STORAGE_SD_DIR, 0755);
+        mkdir(STORAGE_SD_DIR "/intercom", 0755);
+        snprintf(buf, len, STORAGE_SD_DIR "/intercom/%d.ulaw", id);
+    } else {
+        snprintf(buf, len, DIR "/%d.ulaw", id);
+    }
+}
+
+/** Audio file of a saved message (older entries without "file" are in flash). */
+static void entry_path(const cJSON *entry, char *buf, size_t len)
+{
+    const char *file = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "file"));
+    if (file && file[0]) strlcpy(buf, file, len);
+    else snprintf(buf, len, DIR "/%d.ulaw", (int)cJSON_GetNumberValue(cJSON_GetObjectItem(entry, "id")));
+}
+
+/** Audio file of message `id`, or false if there's no such message. */
+static bool message_path(int id, char *buf, size_t len)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cJSON *idx = load_index();
+    bool found = false;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, idx) {
+        if ((int)cJSON_GetNumberValue(cJSON_GetObjectItem(e, "id")) == id) {
+            entry_path(e, buf, len);
+            found = true;
+            break;
+        }
+    }
+    cJSON_Delete(idx);
+    xSemaphoreGive(s_lock);
+    return found;
 }
 
 // ---------------------------------------------------------------- playback
@@ -109,10 +143,8 @@ static void play_file(const char *path)
     fclose(f);
 }
 
-static void play_message(int id)
+static void play_message(const char *path)
 {
-    char path[48];
-    audio_path(id, path, sizeof(path));
     leds_state_t before = leds_get();
     leds_set(LEDS_SPEAKING);
     s_state = ST_PLAYING;
@@ -154,8 +186,8 @@ static void fail(const char *why)
     ESP_LOGW(TAG, "%s", why);
 }
 
-/** Record s_text in Gemini's voice into DIR/<id>.ulaw. Returns seconds, or <0. */
-static float record(int id)
+/** Record s_text in Gemini's voice into `path`. Returns seconds, or <0. */
+static float record(const char *path)
 {
     char key[SETTINGS_API_KEY_MAX];
     if (settings_get_api_key(key, sizeof(key)) != ESP_OK) { fail("No Gemini API key saved (setup page)."); return -1; }
@@ -215,8 +247,6 @@ static float record(int id)
         }
         uint8_t *enc = (uint8_t *)out16;                       // encode in place (1 byte/sample)
         for (size_t i = 0; i < n16; i++) enc[i] = dsp_ulaw_encode(out16[i]);
-        char path[48];
-        audio_path(id, path, sizeof(path));
         FILE *f = fopen(path, "wb");
         bool ok = f && fwrite(enc, 1, n16, f) == n16;
         if (f) ok &= fclose(f) == 0;
@@ -249,7 +279,9 @@ static void intercom_task(void *arg)
             int id = s_replay_id;
             s_replay_id = 0;
             if (s_gate && !s_gate()) { fail("Jarvis is busy (in a conversation). Try again in a moment."); continue; }
-            play_message(id);
+            char path[64];
+            if (!message_path(id, path, sizeof(path))) { fail("That message is gone."); continue; }
+            play_message(path);
             snprintf(s_message, sizeof(s_message), "Said it again.");
             s_state = ST_DONE;
             continue;
@@ -280,8 +312,10 @@ static void intercom_task(void *arg)
             if (n >= id) id = n + 1;
         }
         xSemaphoreGive(s_lock);
-        ESP_LOGI(TAG, "message %d: \"%s\"", id, s_text);
-        float secs = record(id);
+        char path[64];
+        new_audio_path(id, path, sizeof(path));
+        ESP_LOGI(TAG, "message %d: \"%s\" -> %s", id, s_text, path);
+        float secs = record(path);
         if (secs < 0) {
             cJSON_Delete(idx);
             continue;
@@ -293,19 +327,20 @@ static void intercom_task(void *arg)
         cJSON_AddStringToObject(m, "text", s_text);
         cJSON_AddNumberToObject(m, "time", (double)time(NULL));
         cJSON_AddNumberToObject(m, "seconds", roundf(secs * 10) / 10);
+        cJSON_AddStringToObject(m, "file", path);
         cJSON_InsertItemInArray(idx, 0, m);
         while (cJSON_GetArraySize(idx) > INTERCOM_KEEP) {
             cJSON *old = cJSON_DetachItemFromArray(idx, cJSON_GetArraySize(idx) - 1);
-            char path[48];
-            audio_path((int)cJSON_GetNumberValue(cJSON_GetObjectItem(old, "id")), path, sizeof(path));
-            remove(path);
+            char old_path[64];
+            entry_path(old, old_path, sizeof(old_path));
+            remove(old_path);
             cJSON_Delete(old);
         }
         save_index(idx);
         cJSON_Delete(idx);
         s_last_id = id;
         xSemaphoreGive(s_lock);
-        play_message(id);
+        play_message(path);
         snprintf(s_message, sizeof(s_message), "Said it (%.1f s).", secs);
         s_state = ST_DONE;
     }
@@ -353,8 +388,8 @@ esp_err_t intercom_say(const char *text)
 esp_err_t intercom_replay(int id)
 {
     if (!s_job_sem || intercom_busy() || id <= 0) return ESP_ERR_INVALID_STATE;
-    char path[48];
-    audio_path(id, path, sizeof(path));
+    char path[64];
+    if (!message_path(id, path, sizeof(path))) return ESP_ERR_NOT_FOUND;
     struct stat st;
     if (stat(path, &st) != 0) return ESP_ERR_NOT_FOUND;
     s_message[0] = 0;
@@ -371,10 +406,10 @@ esp_err_t intercom_delete(int id)
     esp_err_t err = ESP_ERR_NOT_FOUND;
     for (int i = 0; i < cJSON_GetArraySize(idx); i++) {
         if ((int)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetArrayItem(idx, i), "id")) == id) {
-            cJSON_DeleteItemFromArray(idx, i);
-            char path[48];
-            audio_path(id, path, sizeof(path));
+            char path[64];
+            entry_path(cJSON_GetArrayItem(idx, i), path, sizeof(path));
             remove(path);
+            cJSON_DeleteItemFromArray(idx, i);
             save_index(idx);
             err = ESP_OK;
             break;

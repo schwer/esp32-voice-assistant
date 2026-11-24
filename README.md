@@ -35,6 +35,9 @@ There's no phone app and no cloud backend of your own.
 - **Intercom**: on the board's Intercom page (linked from Diagnostics), type a message and Jarvis
   announces it after a chime, in his Gemini voice. The last 10 are kept as audio, so **Say again**
   replays one instantly, even without Gemini. "Jarvis, what was the last message?" works too.
+- **microSD card (optional)**: insert a FAT32 card and restart. New recordings (messages in
+  Gemini's voice, intercom messages) go to a `jarvis` folder on it; recordings already in the board's
+  memory keep working. The card is never formatted; Diagnostics > Storage shows its status.
 - **Updates by voice**: "Jarvis, is there an update?" / "Jarvis, update yourself". It only ever
   installs when you ask (or press Install update on the diagnostics page) and says when it starts,
   when it's done, or that it didn't work. It mentions a new version once, at the end of an answer.

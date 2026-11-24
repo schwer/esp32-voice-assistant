@@ -1,6 +1,7 @@
 # What's new, in plain words, newest first: one short sentence per line.
 # Jarvis reads the top three when he offers an update (and the diagnostics page
 # shows them), so add a line for every change people would notice.
+If you put a microSD card in me, I keep new recordings on it.
 When I'm plugged in, I stay on Wi-Fi.
 There's an Intercom page: type a message and I'll announce it out loud.
 I can tell you what's in an update before you install it.

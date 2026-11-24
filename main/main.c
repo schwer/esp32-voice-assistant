@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "leds.h"
 #include "storage.h"
+#include "board.h"
 #include "conversations.h"
 #include "diag.h"
 #include "prompts.h"
@@ -552,6 +553,10 @@ void app_main(void)
     net_power_save(true);
 
     if (storage_init() == ESP_OK) {
+        // microSD card (optional): new recordings go there. DAT3 high selects SD mode.
+        if (aerr == ESP_OK) audio_expander_set(BOARD_EXP_SD_D3, true);
+        storage_sd_init();
+        diag_set_status("sd card", storage_sd_status());
         ESP_ERROR_CHECK(conversations_init());
         voicepack_set_gate(device_free);       // never record during a conversation
         voicepack_init();                      // use lines recorded in Gemini's voice, if any

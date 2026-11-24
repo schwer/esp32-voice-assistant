@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,6 +22,7 @@
 #include "prompts.h"
 #include "settings.h"
 #include "voicepack.h"
+#include "storage.h"
 #include "dsp.h"
 
 static const char *TAG = "voicepack";
@@ -46,9 +48,22 @@ static volatile size_t s_cap_len;
 
 // ---------------------------------------------------------------- files
 
+static bool exists(const char *path);
+
+// Recorded sets live in <root>/voice/<Voice>: on the microSD card (STORAGE_SD_DIR) when
+// there is one, else in flash (PROMPTS_RECORDED_DIR). active.txt and job.txt stay in flash.
+#define SD_VOICE_DIR STORAGE_SD_DIR "/voice"
+
+/** Where a voice's set is (card first, then flash); a new set goes where new recordings go. */
 static void voice_dir(const char *voice, char *buf, size_t len)
 {
-    snprintf(buf, len, PROMPTS_RECORDED_DIR "/%.31s", voice);   // voice names are short
+    if (storage_sd_ready()) {
+        snprintf(buf, len, SD_VOICE_DIR "/%.31s", voice);           // voice names are short
+        if (exists(buf)) return;
+    }
+    snprintf(buf, len, PROMPTS_RECORDED_DIR "/%.31s", voice);
+    if (exists(buf)) return;
+    snprintf(buf, len, "%s/voice/%.31s", storage_recordings_root(), voice);
 }
 
 static void read_lines(const char *path, char *l1, size_t n1, char *l2, size_t n2)
@@ -79,8 +94,9 @@ static bool exists(const char *path)
 
 static bool set_complete(const char *voice)
 {
-    char path[96];
-    snprintf(path, sizeof(path), PROMPTS_RECORDED_DIR "/%s/complete", voice);
+    char dir[64], path[96];
+    voice_dir(voice, dir, sizeof(dir));
+    snprintf(path, sizeof(path), "%s/complete", dir);
     return exists(path);
 }
 
@@ -110,21 +126,25 @@ static void remove_dir(const char *dir)
 /** Delete recorded sets other than these two voices (frees space for a new set). */
 static void remove_other_sets(const char *keep1, const char *keep2)
 {
-    DIR *d = opendir(PROMPTS_RECORDED_DIR);
-    if (!d) return;
-    struct dirent *e;
-    char names[8][32];
-    int n = 0;
-    while ((e = readdir(d)) != NULL && n < 8) {
-        if (e->d_name[0] == '.' || strchr(e->d_name, '.')) continue;   // skip *.txt
-        if (strcmp(e->d_name, keep1) == 0 || strcmp(e->d_name, keep2) == 0) continue;
-        strlcpy(names[n++], e->d_name, sizeof(names[0]));
-    }
-    closedir(d);
-    for (int i = 0; i < n; i++) {
-        char dir[64];
-        voice_dir(names[i], dir, sizeof(dir));
-        remove_dir(dir);
+    static const char *const roots[] = { PROMPTS_RECORDED_DIR, SD_VOICE_DIR };
+    for (int r = 0; r < 2; r++) {
+        if (r == 1 && !storage_sd_ready()) break;
+        DIR *d = opendir(roots[r]);
+        if (!d) continue;
+        struct dirent *e;
+        char names[8][32];
+        int n = 0;
+        while ((e = readdir(d)) != NULL && n < 8) {
+            if (e->d_name[0] == '.' || strchr(e->d_name, '.')) continue;   // skip *.txt
+            if (strcasecmp(e->d_name, keep1) == 0 || strcasecmp(e->d_name, keep2) == 0) continue;
+            strlcpy(names[n++], e->d_name, sizeof(names[0]));
+        }
+        closedir(d);
+        for (int i = 0; i < n; i++) {
+            char dir[64];
+            snprintf(dir, sizeof(dir), "%s/%.31s", roots[r], names[i]);
+            remove_dir(dir);
+        }
     }
 }
 
@@ -302,9 +322,18 @@ static void record_task(void *arg)
     s_failed = false;
     s_error[0] = 0;
 
-    voice_dir(voice, dir, sizeof(dir));
     remove_other_sets(voice, s_active);              // keep only the set in use + the new one
+    voice_dir(voice, dir, sizeof(dir));              // a new set goes to the microSD card if there is one
+    {
+        char parent[64];
+        strlcpy(parent, dir, sizeof(parent));
+        char *slash = strrchr(parent, '/');
+        if (slash) *slash = 0;
+        if (strncmp(parent, STORAGE_SD_DIR, strlen(STORAGE_SD_DIR)) == 0) mkdir(STORAGE_SD_DIR, 0755);
+        mkdir(parent, 0755);
+    }
     mkdir(dir, 0755);
+    ESP_LOGI(TAG, "recording %s's voice into %s", voice, dir);
 
     // Re-record: overwrite every line, tracked by "redo-<n>" progress so it can resume.
     int redo_from = 0;

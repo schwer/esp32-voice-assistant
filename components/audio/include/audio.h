@@ -38,3 +38,5 @@ bool audio_is_playing(void);
 void audio_wait_idle(int timeout_ms);
 /** Output volume 0-100. */
 void audio_set_volume(int volume);
+/** Drive an IO expander pin as an output (e.g. the microSD card's DAT3). */
+esp_err_t audio_expander_set(int pin, bool high);

@@ -236,6 +236,8 @@ cJSON *diag_snapshot(void)
         cJSON_AddNumberToObject(st, "total_kb", total / 1024);
     }
     cJSON_AddNumberToObject(st, "saved_conversations", conversations_count());
+    cJSON_AddStringToObject(st, "sd_card", storage_sd_status());
+    cJSON_AddStringToObject(st, "new_recordings_go_to", storage_sd_ready() ? "microSD card" : "board memory");
 
     // Battery: what the assistant reports (level, trend, time left, health) + raw pins.
     battery_status_t bat;

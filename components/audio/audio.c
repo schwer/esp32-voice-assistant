@@ -376,3 +376,12 @@ void audio_wait_idle(int timeout_ms)
     }
     vTaskDelay(pdMS_TO_TICKS(250));                    // tail of the speaker's echo
 }
+
+esp_err_t audio_expander_set(int pin, bool high)
+{
+    if (!s_expander || pin < 0 || pin > 15) return ESP_ERR_INVALID_STATE;
+    uint32_t mask = 1u << pin;
+    esp_err_t err = esp_io_expander_set_dir(s_expander, mask, IO_EXPANDER_OUTPUT);
+    if (err == ESP_OK) err = esp_io_expander_set_level(s_expander, mask, high ? 1 : 0);
+    return err;
+}
