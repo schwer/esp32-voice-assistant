@@ -1,6 +1,6 @@
 {
   "app_max_bytes": 2883584,
   "internal_task_stacks_max_bytes": 101376,
-  "internal_ram_static_max_bytes": null,
-  "note": "Limits the build enforces. app_max_bytes: firmware image (was 2.47 MiB when set to 2.75 MiB). internal_task_stacks_max_bytes: task stacks in internal RAM, counted from the source by tools/ram_budget.py (new tasks: create them WithCaps(MALLOC_CAP_SPIRAM) if they never write flash, or raise this on purpose). internal_ram_static_max_bytes: internal RAM the firmware reserves statically (code, data, bss), from idf.py size; null = report only. A Gemini voice session needs a free 12 KB block of internal RAM, and the board checks for it at runtime. Raise any of these only on purpose, in its own reviewed change."
+  "internal_ram_static_max_bytes": 196608,
+  "note": "Limits the build enforces. app_max_bytes: firmware image (was 2.47 MiB when set to 2.75 MiB). internal_task_stacks_max_bytes: task stacks in internal RAM, counted from the source by tools/ram_budget.py (new tasks: create them WithCaps(MALLOC_CAP_SPIRAM) if they never write flash, or raise this on purpose). internal_ram_static_max_bytes: internal RAM the firmware reserves statically (code, data, bss), from idf.py size; set to 192 KiB when it measured 187,651 bytes. A Gemini voice session needs a free 12 KB block of internal RAM, and the board checks for it at runtime. Raise any of these only on purpose, in its own reviewed change."
 }

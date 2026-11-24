@@ -346,3 +346,10 @@ def test_kconfig_defaults_used_by_ci_exist():
     for name in ("VA_GEMINI_MODEL", "VA_VOICE_NAME", "VA_TIMEZONE", "VA_WAKENET_KEYWORD"):
         assert f"config {name}" in k
     assert 'default "jarvis"' in k
+
+
+def test_static_internal_ram_budget_is_set_and_leaves_room():
+    b = json.loads((ROOT / "firmware_budget.json").read_text())
+    limit = b["internal_ram_static_max_bytes"]
+    assert isinstance(limit, int), "set internal_ram_static_max_bytes so the build enforces it"
+    assert limit <= 200 * 1024, "keep static internal RAM well below the ~340 KB the chip has"
