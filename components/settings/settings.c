@@ -17,6 +17,7 @@ static char s_model[SETTINGS_MODEL_MAX];
 static char s_voice[SETTINGS_VOICE_MAX];
 static char s_location[SETTINGS_LOCATION_MAX];
 static char s_style[SETTINGS_STYLE_MAX];
+static char s_lang[8];
 static bool s_fahrenheit, s_search = true, s_saver = true, s_open_wifi = true, s_barge = true, s_proactive = true;
 
 static void load(nvs_handle_t h, const char *key, char *buf, size_t len, const char *fallback)
@@ -41,6 +42,7 @@ esp_err_t settings_init(void)
     load(h, "voice", s_voice, sizeof(s_voice), CONFIG_VA_VOICE_NAME);
     load(h, "location", s_location, sizeof(s_location), "");
     load(h, "style", s_style, sizeof(s_style), "");
+    load(h, "lang", s_lang, sizeof(s_lang), "");
     // Fahrenheit by default for US time zones, Celsius elsewhere.
     static const char *const US_TZ[] = { "EST", "CST", "MST", "PST", "AKST", "HST" };
     uint8_t f = 0;
@@ -148,6 +150,15 @@ static esp_err_t save_u8(const char *key, uint8_t v)
 const char *settings_get_location(void) { return s_location; }
 const char *settings_get_style(void) { return s_style; }
 esp_err_t settings_set_style(const char *v) { return save("style", v, s_style, sizeof(s_style)); }
+const char *settings_get_language(void) { return s_lang; }
+esp_err_t settings_set_language(const char *v)
+{
+    static const char *const ok[] = { "", "en-GB", "en-AU", "en-IN", "en-US" };
+    for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
+        if (strcmp(v, ok[i]) == 0) return save("lang", v, s_lang, sizeof(s_lang));
+    }
+    return ESP_ERR_INVALID_ARG;
+}
 
 void settings_style_instruction(char *buf, size_t len)
 {
@@ -155,7 +166,8 @@ void settings_style_instruction(char *buf, size_t len)
         buf[0] = 0;
         return;
     }
-    snprintf(buf, len, "Always speak with this accent and style: %s. Keep it the same in every reply. ", s_style);
+    snprintf(buf, len, "Always speak with this accent and style: %s. Use its pronunciation, intonation, "
+             "vocabulary and spelling, and keep it the same in every reply. ", s_style);
 }
 esp_err_t settings_set_location(const char *l) { return save("location", l, s_location, sizeof(s_location)); }
 bool settings_get_fahrenheit(void) { return s_fahrenheit; }

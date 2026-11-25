@@ -37,6 +37,10 @@ esp_err_t settings_set_voice(const char *voice);
 #define SETTINGS_STYLE_MAX 128
 const char *settings_get_style(void);
 esp_err_t settings_set_style(const char *style);
+/** Accent region sent to Gemini as the voice's language code ("en-GB", "en-AU", "en-IN",
+ *  "en-US"), or "" for the model's default. */
+const char *settings_get_language(void);
+esp_err_t settings_set_language(const char *code);
 /** The style as a sentence for a system instruction ("" if none). */
 void settings_style_instruction(char *buf, size_t len);
 

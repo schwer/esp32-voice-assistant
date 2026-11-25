@@ -31,6 +31,7 @@
 #include "voicepack.h"
 #include "clock.h"
 #include "ota.h"
+#include "gemini_live.h"
 #include "intercom.h"
 #include "intercom_page.h"
 #include "freertos/FreeRTOS.h"
@@ -330,7 +331,31 @@ static esp_err_t get_root(httpd_req_t *req)
               "<option value='a relaxed Australian accent'><option value='a clear, neutral American accent'>"
               "</datalist><p class=note>How Jarvis should sound, in your own words, e.g. <em>a refined British accent, "
               "like a butler</em>. Used for conversations, his own messages and the intercom; saving a change "
-              "re-records his messages. Accents work best with Gemini's native-audio models.</p>");
+              "re-records his messages.</p>");
+    {
+        static const char *const REGIONS[][2] = {
+            { "", "Automatic (the model's default)" }, { "en-GB", "English (United Kingdom)" },
+            { "en-AU", "English (Australia)" }, { "en-IN", "English (India)" }, { "en-US", "English (United States)" },
+        };
+        SEND(req, "<label for=lang>Accent region</label><select id=lang name=lang>");
+        for (size_t i = 0; i < sizeof(REGIONS) / sizeof(REGIONS[0]); i++) {
+            SEND(req, "<option value='");
+            SEND(req, REGIONS[i][0]);
+            SEND(req, "'");
+            if (strcmp(settings_get_language(), REGIONS[i][0]) == 0) SEND(req, " selected");
+            SEND(req, ">");
+            SEND(req, REGIONS[i][1]);
+            SEND(req, "</option>");
+        }
+        SEND(req, "</select><p class=note>Tells Gemini's voice which regional English to speak. Some models only "
+                  "follow the style text above, others only this; Test Gemini on the diagnostics page says whether "
+                  "your model accepts it.</p>"
+                  "<script>document.getElementById('style').addEventListener('change',e=>{const l=document.getElementById('lang');"
+                  "if(l.value)return;const v=e.target.value.toLowerCase();"
+                  "const m=[['british','en-GB'],['english accent','en-GB'],['scottish','en-GB'],['welsh','en-GB'],"
+                  "['australian','en-AU'],['indian','en-IN'],['american','en-US']].find(([w])=>v.includes(w));"
+                  "if(m)l.value=m[1]})</script>");
+    }
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
@@ -531,6 +556,7 @@ static esp_err_t post_save(httpd_req_t *req)
     }
     if (form_field(body, "model", val, sizeof(val)) && val[0]) {
         const char *m = strncmp(val, "models/", 7) == 0 ? val + 7 : val;   // accept either form
+        if (strcmp(m, settings_get_model()) != 0) gemini_live_language_unknown();
         err |= settings_set_model(m);
     }
     if (form_field(body, "location", val, sizeof(val))) {
@@ -539,6 +565,11 @@ static esp_err_t post_save(httpd_req_t *req)
     bool style_changed = false;
     if (form_field(body, "style", val, sizeof(val)) && strcmp(val, settings_get_style()) != 0) {
         err |= settings_set_style(val);                   // empty: Gemini's natural voice
+        style_changed = true;
+    }
+    if (form_field(body, "lang", val, sizeof(val)) && strcmp(val, settings_get_language()) != 0) {
+        err |= settings_set_language(val);
+        gemini_live_language_unknown();                    // find out afresh whether the model takes it
         style_changed = true;
     }
     if (form_field(body, "units", val, sizeof(val)) && val[0]) {

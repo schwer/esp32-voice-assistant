@@ -143,6 +143,25 @@ static void setup_message_matches_the_live_api(void)
     free(json);
 }
 
+static void setup_sends_the_language_code_only_when_set(void)
+{
+    gemini_setup_t s = { .model = "m", .voice = "Charon", .system_instruction = "x", .language_code = "en-GB" };
+    char *json = gemini_build_setup(&s);
+    cJSON *m = parse(json);
+    CHECK(strcmp(str_at(m, "setup.generationConfig.speechConfig.languageCode"), "en-GB") == 0);
+    CHECK(!strcmp(str_at(m, "setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName"), "Charon"));
+    cJSON_Delete(m);
+    free(json);
+    for (int i = 0; i < 2; i++) {                    // NULL and "" both mean the model's default
+        gemini_setup_t d = { .model = "m", .voice = "Puck", .system_instruction = "x", .language_code = i ? "" : NULL };
+        json = gemini_build_setup(&d);
+        m = parse(json);
+        CHECK(at(m, "setup.generationConfig.speechConfig.languageCode") == NULL);
+        cJSON_Delete(m);
+        free(json);
+    }
+}
+
 static void setup_without_tools_or_transcripts_omits_them(void)
 {
     // The voice recorder: no tools (the API rejects an empty list) and no transcripts.
@@ -362,6 +381,7 @@ static void transcripts_truncate_safely(void)
 int main(void)
 {
     RUN(base64_round_trips_all_lengths);
+    RUN(setup_sends_the_language_code_only_when_set);
     RUN(account_errors_are_recognised);
     RUN(base64_rejects_garbage_and_overflow);
     RUN(setup_message_matches_the_live_api);

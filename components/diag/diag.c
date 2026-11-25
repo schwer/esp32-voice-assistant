@@ -395,6 +395,7 @@ static const char *live_test(const char *key, char *why, size_t why_len, float *
         .on_state = live_state,
         .on_audio_out = live_audio,
         .on_turn_complete = live_turn,
+        .language_code = settings_get_language(),
     };
     int64_t t0 = esp_timer_get_time();
     if (gemini_live_start(&cfg) != ESP_OK) {
@@ -422,7 +423,9 @@ static const char *live_test(const char *key, char *why, size_t why_len, float *
             snprintf(why, why_len, "Google refused because of the account: %s. Check Billing in AI Studio "
                      "(aistudio.google.com).", err);
         } else {
-            snprintf(why, why_len, "%s", err[0] ? err : "the connection closed");
+            snprintf(why, why_len, "%s%s", err[0] ? err : "the connection closed",
+                     gemini_live_language_sent()[0] && gemini_live_language_ok() < 0
+                         ? ". If this keeps happening, set Accent region to Automatic: the model may not take it" : "");
         }
         res = why;
     }
@@ -490,7 +493,9 @@ cJSON *diag_test_gemini(void)
             return r;
         }
         snprintf(msg, sizeof(msg), "Works: the key is valid, and the model \"%s\" answered a live voice test "
-                 "(%.1f s of speech, %.1f s to answer).", settings_get_model(), secs, took);
+                 "(%.1f s of speech, %.1f s to answer).%s%s%s", settings_get_model(), secs, took,
+                 gemini_live_language_sent()[0] ? " It accepted the accent region " : "",
+                 gemini_live_language_sent(), gemini_live_language_sent()[0] ? "." : "");
         cJSON *r = result(true, status, msg);
         cJSON_AddStringToObject(r, "step", "live");
         return r;

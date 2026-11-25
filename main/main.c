@@ -68,12 +68,23 @@ static void post(app_event_t ev)
 // proactive audio, then also without search; remember what had to be dropped.
 static volatile int s_retry_stage;              // 0 = first try, 1 = no proactive, 2 = neither
 static volatile bool s_try_search, s_try_proactive;
+static volatile bool s_lang_retry;              // retrying without the accent region (language code)
 
 static void on_gemini_state(gemini_state_t st, void *ctx)
 {
     switch (st) {
     case GEMINI_STATE_CONNECTING:     leds_set(LEDS_CONNECTING); break;
     case GEMINI_STATE_READY:
+        if (s_lang_retry) {
+            s_lang_retry = false;
+            gemini_live_set_language_ok(false);
+            ESP_LOGW(TAG, "this model doesn't take an accent region (language code); using the style instruction only");
+            diag_set_status("accent", "this Gemini model ignores the accent region: only the style text applies");
+        } else if (gemini_live_language_sent()[0]) {
+            char s[96];
+            snprintf(s, sizeof(s), "accent region %s accepted by the model", gemini_live_language_sent());
+            diag_set_status("accent", s);
+        }
         if (s_retry_stage == 1) {
             ESP_LOGW(TAG, "'only answer when spoken to' isn't supported by this model; turned it off");
             settings_set_proactive(false);
@@ -143,6 +154,10 @@ static char *build_instruction(bool google_search, bool proactive)
                             "opening hours, prices and facts you're unsure about.\n" : "",
             tools,
             appts ? "\nUpcoming appointments:\n" : "", appts ? appts : "");
+        if (style[0]) {
+            size_t used = strlen(buf);
+            snprintf(buf + used, len - used, "\nRemember: %s", style);   // repeated last, so it sticks
+        }
     }
     free(appts);
     return buf;
@@ -530,6 +545,7 @@ static esp_err_t start_session(bool google_search, bool proactive, bool retry)
         .proactive_audio = proactive,
         .google_search = google_search,
         .keep_buffered_audio = retry,
+        .language_code = s_lang_retry ? NULL : settings_get_language(),
     };
     s_try_search = google_search;
     s_try_proactive = proactive;
@@ -814,7 +830,14 @@ void app_main(void)
                 break;
             }
             // Some models reject optional features in the setup: retry without them,
-            // resending the speech buffered by the failed attempt.
+            // resending the speech buffered by the failed attempt. The accent region first.
+            if (s_retry_stage == 0 && !s_lang_retry && gemini_live_language_sent()[0] &&
+                gemini_live_language_ok() < 0) {
+                ESP_LOGW(TAG, "retrying without the accent region (language code)");
+                s_lang_retry = true;
+                if (start_session(s_try_search, s_try_proactive, true) == ESP_OK) break;
+            }
+            s_lang_retry = false;
             if (s_retry_stage == 0 && s_try_proactive) {
                 ESP_LOGW(TAG, "retrying without 'only answer when spoken to'");
                 s_retry_stage = 1;

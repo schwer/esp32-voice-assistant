@@ -38,12 +38,24 @@ typedef struct {
     bool barge_in;                       // let the user interrupt: keep the mic open while Gemini talks
     bool proactive_audio;                // only answer speech meant for the assistant
     bool google_search;                  // add Google Search grounding next to our function tools
+    /** Accent region of the voice, e.g. "en-GB" (speechConfig.languageCode). Dropped
+     *  automatically once a model has been found to reject it. NULL/"" = default. */
+    const char *language_code;
     bool keep_buffered_audio;            // retry: resend speech buffered by the previous attempt
     /** If set, Gemini's audio (24 kHz mono) goes here instead of the speaker. */
     void (*on_audio_out)(const int16_t *pcm, size_t samples, void *ctx);
     /** Called when Gemini finishes a turn (after turnComplete). */
     void (*on_turn_complete)(void *ctx);
 } gemini_live_config_t;
+
+/** Does the current model take the language code? -1 not known yet, 0 no, 1 yes. */
+int gemini_live_language_ok(void);
+/** Record that a session failed only because of the language code (or worked with it). */
+void gemini_live_set_language_ok(bool ok);
+/** Forget what we learned (the model or the accent region changed). */
+void gemini_live_language_unknown(void);
+/** The language code the last session actually sent ("" if none). */
+const char *gemini_live_language_sent(void);
 
 /** Start connecting. Progress and the end of the session arrive via on_state. */
 esp_err_t gemini_live_start(const gemini_live_config_t *cfg);

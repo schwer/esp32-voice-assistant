@@ -64,6 +64,13 @@ static volatile bool s_echo;                        // heard itself: no barge-in
 static cJSON *s_tool_msg;                           // toolResponse being assembled
 
 const char *gemini_live_last_error(void) { return s_error; }
+
+static char s_lang[12];                              // language code sent in this session
+static volatile int s_lang_ok = -1;                  // does this model take it? -1 unknown
+int gemini_live_language_ok(void) { return s_lang_ok; }
+void gemini_live_set_language_ok(bool ok) { s_lang_ok = ok ? 1 : 0; }
+void gemini_live_language_unknown(void) { s_lang_ok = -1; }
+const char *gemini_live_language_sent(void) { return s_lang; }
 bool gemini_live_echo_detected(void) { return s_echo; }
 bool gemini_live_ready(void) { return s_ready; }
 
@@ -145,6 +152,7 @@ static void send_setup(void)
         // Transcripts also feed the echo check, so ask for them whenever barge-in is on.
         .transcription = s_cfg.on_transcript != NULL || s_cfg.barge_in,
         .proactive_audio = s_cfg.proactive_audio,
+        .language_code = s_lang,
     };
     s_cfg.tools = NULL;                              // consumed by gemini_build_setup
     char *json = gemini_build_setup(&setup);
@@ -193,6 +201,7 @@ static void h_setup_complete(void *ctx)
     s_preroll_len = 0;
     xSemaphoreGive(s_lock);
     touch();
+    if (s_lang[0]) s_lang_ok = 1;                    // the model took the language code
     set_state(GEMINI_STATE_READY);
 }
 
@@ -406,6 +415,11 @@ esp_err_t gemini_live_start(const gemini_live_config_t *cfg)
         return ESP_ERR_NO_MEM;
     }
     s_cfg = *cfg;
+    // Accent region: send it unless this model has already refused it.
+    s_lang[0] = 0;
+    if (cfg->language_code && cfg->language_code[0] && s_lang_ok != 0) {
+        strlcpy(s_lang, cfg->language_code, sizeof(s_lang));
+    }
     free(s_system);
     s_system = cfg->system_instruction ? strdup(cfg->system_instruction) : NULL;
     s_error[0] = 0;

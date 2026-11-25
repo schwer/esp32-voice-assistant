@@ -207,6 +207,7 @@ static float record(const char *path)
         .on_state = on_state,
         .on_audio_out = on_audio_out,
         .on_turn_complete = on_turn_complete,
+        .language_code = settings_get_language(),
     };
     s_gemini_failed = false;
     s_cap_len = 0;
@@ -214,8 +215,18 @@ static float record(const char *path)
     xSemaphoreTake(s_ready_sem, 0);
     xSemaphoreTake(s_turn_sem, 0);
     esp_err_t err = gemini_live_start(&cfg);
+    bool ready = err == ESP_OK && xSemaphoreTake(s_ready_sem, pdMS_TO_TICKS(READY_TIMEOUT_MS)) == pdTRUE && !s_gemini_failed;
+    if (!ready && gemini_live_language_sent()[0] && gemini_live_language_ok() < 0) {
+        gemini_live_stop();                          // maybe the model doesn't take an accent region
+        gemini_live_set_language_ok(false);
+        s_gemini_failed = false;
+        xSemaphoreTake(s_ready_sem, 0);
+        err = gemini_live_start(&cfg);
+        ready = err == ESP_OK && xSemaphoreTake(s_ready_sem, pdMS_TO_TICKS(READY_TIMEOUT_MS)) == pdTRUE && !s_gemini_failed;
+        if (!ready) gemini_live_language_unknown();
+    }
     memset(key, 0, sizeof(key));
-    if (err != ESP_OK || xSemaphoreTake(s_ready_sem, pdMS_TO_TICKS(READY_TIMEOUT_MS)) != pdTRUE || s_gemini_failed) {
+    if (!ready) {
         char why[160];
         snprintf(why, sizeof(why), "Couldn't reach Gemini: %s",
                  gemini_live_last_error()[0] ? gemini_live_last_error() : "no answer");

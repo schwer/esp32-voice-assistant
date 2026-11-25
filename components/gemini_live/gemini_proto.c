@@ -73,10 +73,12 @@ char *gemini_build_setup(gemini_setup_t *s)
 
     cJSON *gen = cJSON_AddObjectToObject(setup, "generationConfig");
     cJSON_AddItemToArray(cJSON_AddArrayToObject(gen, "responseModalities"), cJSON_CreateString("AUDIO"));
-    cJSON *voice = cJSON_AddObjectToObject(
-        cJSON_AddObjectToObject(cJSON_AddObjectToObject(gen, "speechConfig"), "voiceConfig"),
-        "prebuiltVoiceConfig");
+    cJSON *speech = cJSON_AddObjectToObject(gen, "speechConfig");
+    cJSON *voice = cJSON_AddObjectToObject(cJSON_AddObjectToObject(speech, "voiceConfig"), "prebuiltVoiceConfig");
     cJSON_AddStringToObject(voice, "voiceName", s->voice ? s->voice : "");
+    if (s->language_code && s->language_code[0]) {
+        cJSON_AddStringToObject(speech, "languageCode", s->language_code);   // regional accent of the voice
+    }
 
     cJSON *part = cJSON_CreateObject();
     cJSON_AddStringToObject(part, "text", s->system_instruction ? s->system_instruction : "");

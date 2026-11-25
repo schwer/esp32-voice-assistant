@@ -41,6 +41,7 @@ typedef struct {
     bool google_search;
     bool transcription;              // ask for input/output transcripts
     bool proactive_audio;            // let the model stay silent for speech not meant for it
+    const char *language_code;       // speechConfig.languageCode, e.g. "en-GB" (NULL/"" = model's default)
 } gemini_setup_t;
 
 /** The setup message (caller frees). Takes ownership of s->tools and sets it to NULL. */
