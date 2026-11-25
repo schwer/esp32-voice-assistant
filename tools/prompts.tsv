@@ -26,3 +26,4 @@ update_started	Updating now. I will be back in about a minute.
 update_done	I have been updated to the latest version.
 update_failed	Sorry, the update did not work. I am still on the old version.
 update_offer	There is a software update. To install it, say Jarvis again now.
+wifi_setup_hotspot	I cannot reach Wi-Fi. To set me up, connect your phone to the Jarvis Setup network.
