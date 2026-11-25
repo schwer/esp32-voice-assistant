@@ -165,3 +165,19 @@ test('Gemini test: shows the live voice step result, good or bad', async ({ page
   await expect(page.locator('#result')).toHaveText(/^Works:/);
   await expect(page.locator('#result')).toHaveClass('ok');
 });
+
+test('slow actions run as a job: the page waits for the result', async ({ page }) => {
+  let polls = 0;
+  const { calls } = await serve(page, DIAG_HTML(), {
+    'GET /diag.json': () => snapshot({ level: '80%' }),
+    'GET /diag/leds.json': () => IDLE, 'GET /diag/messages.json': () => MESSAGES,
+    'POST /diag/test-gemini': () => ({ state: 'running' }),
+    'GET /diag/job': () => (++polls < 3 ? { state: 'running', name: 'test-gemini' }
+      : { state: 'done', name: 'test-gemini', result: { ok: true, message: 'Works: the key is valid.' } }),
+  });
+  await page.goto('http://dev/diag');
+  await page.click('button[data-act="test-gemini"]');
+  await expect(page.locator('#result')).toHaveText('Works: the key is valid.', { timeout: 8000 });
+  await expect(page.locator('#result')).toHaveClass('ok');
+  expect(calls.filter((c) => c.key === 'GET /diag/job').length).toBeGreaterThanOrEqual(3);
+});

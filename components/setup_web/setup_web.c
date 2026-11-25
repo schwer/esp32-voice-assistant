@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <time.h>
 #include "esp_log.h"
+#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_http_server.h"
 #include "esp_app_desc.h"
@@ -616,11 +617,68 @@ static esp_err_t get_diag_logs(httpd_req_t *req)
     return err;
 }
 
-static esp_err_t post_test_gemini(httpd_req_t *req)
+// ---------- slow actions run as a job, so the page server's stack stays small
+// (Test Gemini and the update checks open TLS connections; that needs a big stack,
+// which now only exists while one of them runs). The page polls /diag/job.
+
+typedef cJSON *(*job_fn_t)(void);
+static SemaphoreHandle_t s_job_lock;
+static volatile bool s_job_running;
+static cJSON *s_job_result;
+static char s_job_name[24];
+
+static void job_task(void *arg)
+{
+    cJSON *r = ((job_fn_t)arg)();
+    xSemaphoreTake(s_job_lock, portMAX_DELAY);
+    cJSON_Delete(s_job_result);
+    s_job_result = r;
+    s_job_running = false;
+    xSemaphoreGive(s_job_lock);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t start_job(httpd_req_t *req, const char *name, job_fn_t fn)
 {
     if (!diag_action_allowed(req)) return forbid(req);
-    return send_json(req, diag_test_gemini());
+    if (!s_job_lock) s_job_lock = xSemaphoreCreateMutex();
+    cJSON *r = cJSON_CreateObject();
+    xSemaphoreTake(s_job_lock, portMAX_DELAY);
+    if (s_job_running) {
+        cJSON_AddBoolToObject(r, "ok", false);
+        cJSON_AddStringToObject(r, "message", "Still working on the last test. Wait a moment.");
+    } else {
+        cJSON_Delete(s_job_result);
+        s_job_result = NULL;
+        strlcpy(s_job_name, name, sizeof(s_job_name));
+        s_job_running = xTaskCreate(job_task, "web_job", 8192, (void *)fn, 3, NULL) == pdPASS;
+        if (s_job_running) {
+            cJSON_AddStringToObject(r, "state", "running");
+        } else {
+            cJSON_AddBoolToObject(r, "ok", false);
+            cJSON_AddStringToObject(r, "message", "Out of memory: try again when Jarvis isn't talking.");
+        }
+    }
+    xSemaphoreGive(s_job_lock);
+    return send_json(req, r);
 }
+
+static esp_err_t get_job(httpd_req_t *req)
+{
+    cJSON *r = cJSON_CreateObject();
+    if (!s_job_lock) {
+        cJSON_AddStringToObject(r, "state", "idle");
+        return send_json(req, r);
+    }
+    xSemaphoreTake(s_job_lock, portMAX_DELAY);
+    cJSON_AddStringToObject(r, "state", s_job_running ? "running" : s_job_result ? "done" : "idle");
+    cJSON_AddStringToObject(r, "name", s_job_name);
+    if (!s_job_running && s_job_result) cJSON_AddItemToObject(r, "result", cJSON_Duplicate(s_job_result, true));
+    xSemaphoreGive(s_job_lock);
+    return send_json(req, r);
+}
+
+static esp_err_t post_test_gemini(httpd_req_t *req) { return start_job(req, "test-gemini", diag_test_gemini); }
 
 static esp_err_t get_leds_json(httpd_req_t *req)
 {
@@ -668,9 +726,8 @@ static esp_err_t post_speaker_test(httpd_req_t *req)
     return send_json(req, r);
 }
 
-static esp_err_t post_update_check(httpd_req_t *req)
+static cJSON *job_update_check(void)
 {
-    if (!diag_action_allowed(req)) return forbid(req);
     ota_status_t st;
     ota_check(&st);
     char msg[800];
@@ -683,12 +740,11 @@ static esp_err_t post_update_check(httpd_req_t *req)
     cJSON *r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", st.ok);
     cJSON_AddStringToObject(r, "message", msg);
-    return send_json(req, r);
+    return r;
 }
 
-static esp_err_t post_update_install(httpd_req_t *req)
+static cJSON *job_update_install(void)
 {
-    if (!diag_action_allowed(req)) return forbid(req);
     ota_status_t st;
     ota_check(&st);
     cJSON *r = cJSON_CreateObject();
@@ -701,8 +757,11 @@ static esp_err_t post_update_install(httpd_req_t *req)
         cJSON_AddStringToObject(r, "message", st.needs_usb ? "This update needs the web install page (USB)."
                                               : st.ok ? "Already up to date." : "Couldn't reach the update site.");
     }
-    return send_json(req, r);
+    return r;
 }
+
+static esp_err_t post_update_check(httpd_req_t *req) { return start_job(req, "update-check", job_update_check); }
+static esp_err_t post_update_install(httpd_req_t *req) { return start_job(req, "update-install", job_update_install); }
 
 // ---------- intercom
 
@@ -726,10 +785,17 @@ static esp_err_t post_intercom_say(httpd_req_t *req)
 {
     if (!diag_action_allowed(req)) return forbid(req);
     s_last_activity_us = esp_timer_get_time();
-    char body[INTERCOM_TEXT_BYTES * 3 + 16], text[INTERCOM_TEXT_BYTES + 1] = "";
-    if (!read_form(req, body, sizeof(body))) return ESP_FAIL;
-    form_field(body, "text", text, sizeof(text));
+    // ~3.6 KB: from the heap (PSRAM), not the page server's small stack.
+    char *body = malloc(INTERCOM_TEXT_BYTES * 3 + 16), *text = calloc(1, INTERCOM_TEXT_BYTES + 1);
+    if (!body || !text || !read_form(req, body, INTERCOM_TEXT_BYTES * 3 + 16)) {
+        free(body);
+        free(text);
+        return ESP_FAIL;
+    }
+    form_field(body, "text", text, INTERCOM_TEXT_BYTES + 1);
     esp_err_t err = intercom_say(text);
+    free(body);
+    free(text);
     return intercom_reply(req, err, err == ESP_ERR_INVALID_ARG ? "Type a message of up to 300 characters."
                                                                 : "Jarvis is still busy with the last message.");
 }
@@ -922,7 +988,7 @@ esp_err_t setup_web_start(void)
         return ESP_OK;
     }
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.stack_size = 10240;              // the API key test does a TLS handshake here
+    cfg.stack_size = 6144;               // slow TLS work runs as a job (start_job), not here
     cfg.lru_purge_enable = true;         // a new browser connection closes the oldest idle one
     cfg.max_open_sockets = 5;            // leave sockets for Gemini, weather, time and mDNS
     cfg.max_uri_handlers = 40;
@@ -937,6 +1003,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/diag.json",        .method = HTTP_GET,  .handler = get_diag_json },
         { .uri = "/diag/logs",        .method = HTTP_GET,  .handler = get_diag_logs },
         { .uri = "/diag/test-gemini", .method = HTTP_POST, .handler = post_test_gemini },
+        { .uri = "/diag/job",         .method = HTTP_GET,  .handler = get_job },
         { .uri = "/diag/leds.json",   .method = HTTP_GET,  .handler = get_leds_json },
         { .uri = "/diag/led-preview", .method = HTTP_POST, .handler = post_led_preview },
         { .uri = "/diag/reboot",      .method = HTTP_POST, .handler = post_reboot },

@@ -8,6 +8,7 @@
 #include "esp_attr.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "cJSON.h"
 #include "nvs_flash.h"
 #include "audio.h"
 #include "wakeword.h"
@@ -538,8 +539,17 @@ static esp_err_t start_session(bool google_search, bool proactive, bool retry)
     return err;
 }
 
+/** cJSON (Gemini messages, page data) allocates many small nodes: keep them out of internal RAM. */
+static void *json_malloc(size_t n)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(n);
+}
+
 void app_main(void)
 {
+    cJSON_Hooks hooks = { .malloc_fn = json_malloc, .free_fn = free };
+    cJSON_InitHooks(&hooks);                   // before anything builds JSON
     ESP_ERROR_CHECK(nvs_flash_init());
     ota_init();                                // is this a new version on trial?
     diag_init();                               // capture logs for the diagnostics page
