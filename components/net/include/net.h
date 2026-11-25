@@ -27,6 +27,12 @@ bool net_on_public_network(void);
 /** Called (from the Wi-Fi task) when we move between our networks and public ones. */
 typedef void (*net_trust_cb_t)(bool public_network);
 void net_on_trust_change(net_trust_cb_t cb);
+/** Make a saved network the first choice and switch to it now (setup page "Use now"). */
+esp_err_t net_select(const char *ssid);
+/** Setup hotspot ("Jarvis-Setup-XXXX", open) turned on or off. Called from the Wi-Fi task. */
+typedef void (*net_ap_cb_t)(bool on, const char *ssid);
+void net_on_setup_ap(net_ap_cb_t cb);
+bool net_setup_ap_on(void);
 /** Turn Wi-Fi off (battery saving between conversations). */
 void net_disconnect(void);
 bool net_is_connected(void);

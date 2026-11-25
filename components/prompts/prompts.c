@@ -73,6 +73,8 @@ extern const uint8_t update_failed_pcm_start[] asm("_binary_update_failed_adpcm_
 extern const uint8_t update_failed_pcm_end[]   asm("_binary_update_failed_adpcm_end");
 extern const uint8_t update_offer_pcm_start[] asm("_binary_update_offer_adpcm_start");
 extern const uint8_t update_offer_pcm_end[]   asm("_binary_update_offer_adpcm_end");
+extern const uint8_t wifi_setup_hotspot_pcm_start[] asm("_binary_wifi_setup_hotspot_adpcm_start");
+extern const uint8_t wifi_setup_hotspot_pcm_end[]   asm("_binary_wifi_setup_hotspot_adpcm_end");
 
 static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { ready_pcm_start, ready_pcm_end },
@@ -102,6 +104,7 @@ static const struct { const uint8_t *start, *end; } CLIPS[PROMPT_COUNT] = {
     { update_done_pcm_start, update_done_pcm_end },
     { update_failed_pcm_start, update_failed_pcm_end },
     { update_offer_pcm_start, update_offer_pcm_end },
+    { wifi_setup_hotspot_pcm_start, wifi_setup_hotspot_pcm_end },
 };
 
 // Ids in enum order (must match prompt_t and tools/prompts.tsv).
@@ -112,6 +115,7 @@ static const char *const IDS[PROMPT_COUNT] = {
     "mic_test_start", "mic_test_hello", "mic_test_nothing",
     "battery_low", "battery_critical", "timer_done", "alarm_ringing",
     "update_started", "update_done", "update_failed", "update_offer",
+    "wifi_setup_hotspot",
 };
 
 // The phrase list itself is embedded so the device can re-record lines in Gemini's voice.

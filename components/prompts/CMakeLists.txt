@@ -4,7 +4,8 @@ set(clips ready need_wifi need_api_key wifi_lost wifi_back no_internet gemini_fa
           wake_ack_1 wake_ack_2 wake_ack_3 not_ready
           mic_test_start mic_test_hello mic_test_nothing
           battery_low battery_critical timer_done alarm_ringing
-          update_started update_done update_failed update_offer)
+          update_started update_done update_failed update_offer
+          wifi_setup_hotspot)
 set(clip_files)
 foreach(c ${clips})
     list(APPEND clip_files "clips/${c}.adpcm")   # 16 kHz IMA ADPCM, 4 bits/sample

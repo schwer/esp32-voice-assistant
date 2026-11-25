@@ -29,7 +29,11 @@ There's no phone app and no cloud backend of your own.
 - **Saved conversations**: say "remember this conversation", later "let's resume our conversation",
   hear the saved ones newest first and say "that one"
 - **Wi-Fi anywhere**: remembers up to 5 networks (home, your phone's hotspot, work) and joins
-  whichever is around. Optionally uses free Wi-Fi with no password, but only if it really reaches
+  whichever is around; the setup page can switch (**Use now**) or forget each one. Passwords are
+  stored encrypted (AES-256-GCM, key derived from a secret the board burns into its eFuse once).
+  If none of them is reachable, the board opens its own open **Jarvis-Setup-XXXX** network and says
+  so: join it with a phone and the "sign in to network" screen lets you pick a network and enter its
+  password (that screen only does Wi-Fi setup). Optionally uses free Wi-Fi with no password, but only if it really reaches
   the internet (networks that want you to click "Accept" on a page are skipped), and the setup page
   switches itself off on public networks.
 - **Intercom**: on the board's Intercom page (linked from Diagnostics), type a message and Jarvis

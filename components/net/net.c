@@ -26,6 +26,8 @@
 #include "sdkconfig.h"
 #include "net.h"
 #include "net_logic.h"
+#include "net_secret.h"
+#include "esp_mac.h"
 
 static const char *TAG = "net";
 
@@ -56,48 +58,92 @@ static int s_n_saved;
 static volatile bool s_allow_open = true;
 static volatile bool s_untrusted;       // on an open network that isn't one of ours
 static net_trust_cb_t s_trust_cb;
+
+// Setup hotspot: when none of our networks can be joined, the board opens its own open
+// network ("Jarvis-Setup-XXXX") so someone nearby can give it Wi-Fi details.
+#define AP_AFTER_US      (90LL * 1000000)       // offline this long (with networks saved)
+#define AP_LINGER_US     (30LL * 1000000)       // keep it a little after connecting
+static esp_netif_t *s_ap_netif;
+static volatile bool s_ap_on;
+static char s_ap_ssid[33];
+static int64_t s_offline_since, s_connected_at;
+static net_ap_cb_t s_ap_cb;
+static char s_preferred[NET_SSID_MAX];          // "Use now" on the setup page
+
+static int ap_clients(void)
+{
+    wifi_sta_list_t l;
+    return s_ap_on && esp_wifi_ap_get_sta_list(&l) == ESP_OK ? l.num : 0;
+}
 static struct { char ssid[NET_SSID_MAX]; int64_t until; } s_blocked[MAX_BLOCKED];
 
 // ---------------------------------------------------------------- saved networks
 
+// Passwords are stored encrypted (net_secret: AES-256-GCM, key from an eFuse secret)
+// when the chip supports it; "enc" says which form the "p<n>" entries are in.
 static void save_list(void)
 {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    bool enc = net_secret_hardware();
     nvs_set_u8(h, "n", (uint8_t)s_n_saved);
+    nvs_set_u8(h, "enc", enc);
     for (int i = 0; i < NET_MAX_SAVED; i++) {
         char ks[4], kp[4];
         snprintf(ks, sizeof(ks), "s%d", i);
         snprintf(kp, sizeof(kp), "p%d", i);
+        nvs_erase_key(h, kp);                         // its type may change (text -> encrypted)
         if (i < s_n_saved) {
             nvs_set_str(h, ks, s_saved[i].ssid);
-            nvs_set_str(h, kp, s_saved[i].pass);
+            if (enc) {
+                uint8_t blob[NET_PASS_MAX + NET_SECRET_OVERHEAD];
+                size_t bl = net_secret_seal((const uint8_t *)s_saved[i].pass, strlen(s_saved[i].pass), blob);
+                if (bl) nvs_set_blob(h, kp, blob, bl);
+                memset(blob, 0, sizeof(blob));
+            } else {
+                nvs_set_str(h, kp, s_saved[i].pass);
+            }
         } else {
             nvs_erase_key(h, ks);
-            nvs_erase_key(h, kp);
         }
     }
     nvs_commit(h);
     nvs_close(h);
 }
 
-static void load_list(void)
+/** Returns true if the stored passwords are plain text (and should be re-saved encrypted). */
+static bool load_list(void)
 {
     nvs_handle_t h;
     s_n_saved = 0;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
-    uint8_t n = 0;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    uint8_t n = 0, enc = 0;
     nvs_get_u8(h, "n", &n);
+    nvs_get_u8(h, "enc", &enc);
     for (int i = 0; i < n && i < NET_MAX_SAVED; i++) {
         char ks[4], kp[4];
         snprintf(ks, sizeof(ks), "s%d", i);
         snprintf(kp, sizeof(kp), "p%d", i);
-        size_t ls = sizeof(s_saved[0].ssid), lp = sizeof(s_saved[0].pass);
-        if (nvs_get_str(h, ks, s_saved[s_n_saved].ssid, &ls) != ESP_OK) continue;
-        if (nvs_get_str(h, kp, s_saved[s_n_saved].pass, &lp) != ESP_OK) s_saved[s_n_saved].pass[0] = 0;
+        net_saved_t *e = &s_saved[s_n_saved];
+        size_t ls = sizeof(e->ssid), lp = sizeof(e->pass);
+        if (nvs_get_str(h, ks, e->ssid, &ls) != ESP_OK) continue;
+        if (enc) {
+            uint8_t blob[NET_PASS_MAX + NET_SECRET_OVERHEAD];
+            size_t bl = sizeof(blob);
+            int k = nvs_get_blob(h, kp, blob, &bl) == ESP_OK ? net_secret_open(blob, bl, (uint8_t *)e->pass) : -1;
+            memset(blob, 0, sizeof(blob));
+            if (k < 0 || k >= NET_PASS_MAX) {
+                ESP_LOGW(TAG, "couldn't decrypt the password for '%s': add it again", e->ssid);
+                continue;
+            }
+            e->pass[k] = 0;
+        } else if (nvs_get_str(h, kp, e->pass, &lp) != ESP_OK) {
+            e->pass[0] = 0;
+        }
         s_n_saved++;
     }
     nvs_close(h);
+    return !enc && n > 0;
 }
 
 // ---------------------------------------------------------------- events
@@ -122,7 +168,9 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         ESP_LOGW(TAG, "disconnected: %s (reason %d), attempt %d",
                  net_reason_text(d->reason), d->reason, s_attempts);
         bool gone = d->reason == WIFI_REASON_NO_AP_FOUND && s_attempts >= 2;
-        if (s_attempts < FAST_RETRIES && !gone) {
+        if (ap_clients() > 0) {
+            xEventGroupSetBits(s_events, BIT_FAILED); // someone is on the setup hotspot: hold still
+        } else if (s_attempts < FAST_RETRIES && !gone) {
             esp_wifi_connect();                       // transient failures are common
         } else {
             xEventGroupSetBits(s_events, BIT_FAILED);
@@ -144,6 +192,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         } else {
             xEventGroupClearBits(s_events, BIT_FAILED);
             xEventGroupSetBits(s_events, BIT_CONNECTED);
+            s_connected_at = esp_timer_get_time();
             ESP_LOGI(TAG, "connected - setup page: http://" IPSTR "/", IP2STR(&e->ip_info.ip));
         }
     }
@@ -233,6 +282,7 @@ static bool try_choice(const net_choice_t *c, bool check_internet)
     s_attempts = 0;
     xEventGroupClearBits(s_events, BIT_FAILED);
     xEventGroupSetBits(s_events, BIT_CONNECTED);
+    s_connected_at = esp_timer_get_time();
     char url[64] = "";
     net_device_url(url, sizeof(url));
     ESP_LOGI(TAG, "connected to '%s'%s - %s", c->ssid, untrusted ? " (public network)" : "",
@@ -261,6 +311,23 @@ static bool roam_once(void)
     s_roaming = true;
     esp_wifi_disconnect();                            // stop the driver's own retries
     vTaskDelay(pdMS_TO_TICKS(150));
+    if (s_preferred[0]) {
+        int i = 0;
+        while (i < s_n_saved && strcmp(s_saved[i].ssid, s_preferred) != 0) i++;
+        s_preferred[0] = 0;
+        if (i < s_n_saved) {
+            net_choice_t c = { .saved = true, .open = !s_saved[i].pass[0] };
+            strlcpy(c.ssid, s_saved[i].ssid, sizeof(c.ssid));
+            strlcpy(c.pass, s_saved[i].pass, sizeof(c.pass));
+            ok = try_choice(&c, false);
+            memset(&c, 0, sizeof(c));
+        }
+        if (ok) {
+            s_roaming = false;
+            xSemaphoreGive(s_radio);
+            return true;
+        }
+    }
     wifi_ap_record_t *all = calloc(40, sizeof(*all));
     net_ap_t *aps = calloc(40, sizeof(*aps));
     net_choice_t *choices = calloc(8, sizeof(*choices));
@@ -309,11 +376,51 @@ static bool roam_once(void)
     return ok;
 }
 
+static void ap_start(void)
+{
+    if (s_ap_on) return;
+    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    wifi_config_t ap = {0};
+    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "Jarvis-Setup-%02X%02X", mac[4], mac[5]);
+    strlcpy((char *)ap.ap.ssid, s_ap_ssid, sizeof(ap.ap.ssid));
+    ap.ap.ssid_len = strlen(s_ap_ssid);
+    ap.ap.channel = 6;
+    ap.ap.authmode = WIFI_AUTH_OPEN;             // anyone nearby can set the board up (it only offers Wi-Fi setup)
+    ap.ap.max_connection = 2;
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
+    esp_wifi_set_config(WIFI_IF_AP, &ap);
+    ensure_started();
+    s_ap_on = true;
+    ESP_LOGW(TAG, "can't reach Wi-Fi: setup hotspot '%s' is on (http://192.168.4.1/)", s_ap_ssid);
+    if (s_ap_cb) s_ap_cb(true, s_ap_ssid);
+}
+
+static void ap_stop(void)
+{
+    if (!s_ap_on) return;
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    s_ap_on = false;
+    ESP_LOGI(TAG, "setup hotspot off");
+    if (s_ap_cb) s_ap_cb(false, s_ap_ssid);
+}
+
 static void roam_task(void *arg)
 {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ROAM_PAUSE_MS));
-        if (!s_want || net_is_connected() || !s_started) continue;
+        int64_t now = esp_timer_get_time();
+        if (net_is_connected()) {
+            s_offline_since = 0;
+            if (s_ap_on && now - s_connected_at > AP_LINGER_US) ap_stop();
+            if (!s_preferred[0]) continue;               // "Use now": switch networks below
+        } else if (s_want) {
+            if (!s_offline_since) s_offline_since = now;
+            if (!s_ap_on && (!s_n_saved || now - s_offline_since > AP_AFTER_US)) ap_start();
+        }
+        if (!s_want || !s_started) continue;
+        if (ap_clients() > 0 && !s_preferred[0]) continue;   // don't hop channels under a phone
         if (!s_n_saved && !s_allow_open) continue;
         roam_once();
     }
@@ -341,13 +448,34 @@ esp_err_t net_init(void)
 
     // Our own list of networks. Older firmware kept one network in the Wi-Fi driver's
     // settings: adopt it. From now on the driver's settings are working state only.
-    load_list();
+    bool secured = net_secret_init() == ESP_OK;
+    bool plain = load_list();
     wifi_config_t drv = {0};
     if (esp_wifi_get_config(WIFI_IF_STA, &drv) == ESP_OK && drv.sta.ssid[0] && !s_n_saved) {
         s_n_saved = net_saved_add(s_saved, s_n_saved, (const char *)drv.sta.ssid, (const char *)drv.sta.password);
-        save_list();
+        plain = true;
         ESP_LOGI(TAG, "kept the saved network '%s'", s_saved[0].ssid);
     }
+    if (plain && secured) {
+        save_list();                                  // now encrypted
+        ESP_LOGI(TAG, "Wi-Fi passwords are now stored encrypted");
+    }
+    // The Wi-Fi driver kept its own plain-text copy of one network in NVS: erase it once.
+    nvs_handle_t h;
+    uint8_t cleared = 0;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_get_u8(h, "drvclr", &cleared);
+        if (!cleared && drv.sta.ssid[0]) {
+            esp_wifi_restore();                       // resets the driver's stored settings
+            ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        }
+        if (!cleared) {
+            nvs_set_u8(h, "drvclr", 1);
+            nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    memset(&drv, 0, sizeof(drv));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     if (s_n_saved) {                                  // first try: the most recent network
         memset(&drv, 0, sizeof(drv));
@@ -380,6 +508,9 @@ esp_err_t net_connect(int timeout_ms)
         return ESP_OK;
     }
     if (!s_n_saved) {
+        s_want = true;                                // nothing saved: the setup hotspot comes up
+        ensure_started();
+        kick_roam();
         return ESP_ERR_NOT_FOUND;
     }
     xEventGroupClearBits(s_events, BIT_ABORT | BIT_FAILED);
@@ -458,6 +589,31 @@ void net_set_allow_open(bool allow)
 }
 
 bool net_on_public_network(void) { return s_untrusted && net_is_connected(); }
+
+void net_on_setup_ap(net_ap_cb_t cb) { s_ap_cb = cb; }
+bool net_setup_ap_on(void) { return s_ap_on; }
+
+esp_err_t net_select(const char *ssid)
+{
+    int i = 0;
+    while (i < s_n_saved && strcmp(s_saved[i].ssid, ssid) != 0) i++;
+    if (i == s_n_saved) return ESP_ERR_NOT_FOUND;
+    char pass[NET_PASS_MAX];
+    strlcpy(pass, s_saved[i].pass, sizeof(pass));
+    s_n_saved = net_saved_add(s_saved, s_n_saved, ssid, pass);   // first in the list from now on
+    memset(pass, 0, sizeof(pass));
+    save_list();
+    char cur[NET_SSID_MAX] = "";
+    net_current_ssid(cur, sizeof(cur));
+    if (strcmp(cur, ssid) != 0) {
+        strlcpy(s_preferred, ssid, sizeof(s_preferred));
+        s_want = true;
+        ensure_started();
+        kick_roam();
+        ESP_LOGI(TAG, "switching to '%s'", ssid);
+    }
+    return ESP_OK;
+}
 
 void net_on_trust_change(net_trust_cb_t cb) { s_trust_cb = cb; }
 

@@ -4,6 +4,7 @@ const { cString } = require('./c_html');
 
 const DIAG_HTML = () => cString('components/setup_web/diag_page.h', 'DIAG_PAGE');
 const INTERCOM_HTML = () => cString('components/setup_web/intercom_page.h', 'INTERCOM_PAGE');
+const CAPTIVE_HTML = () => cString('components/captive/captive_page.h', 'CAPTIVE_PAGE');
 const PROGRESS_HTML = () =>
   '<!doctype html><html><head><meta charset=utf-8></head><body><p class=ok>Saved.</p>' +
   cString('components/setup_web/setup_web.c', 'VOICE_PROGRESS_HTML') + '</body></html>';
@@ -34,4 +35,4 @@ async function serve(page, html, api) {
   return { calls, errors };
 }
 
-module.exports = { DIAG_HTML, INTERCOM_HTML, PROGRESS_HTML, serve };
+module.exports = { DIAG_HTML, INTERCOM_HTML, CAPTIVE_HTML, PROGRESS_HTML, serve };

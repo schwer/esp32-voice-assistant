@@ -227,6 +227,8 @@ static esp_err_t get_root(httpd_req_t *req)
     if (failed) SEND(req, "<p class=warn>Couldn't save. Check the values and try again.</p>");
     if (strstr(q, "wifi=added")) SEND(req, "<p class=ok>Network added.</p>");
     if (strstr(q, "wifi=forgot")) SEND(req, "<p class=ok>Network forgotten.</p>");
+    if (strstr(q, "wifi=switching")) SEND(req, "<p class=ok>Switching networks. If it's a different network, the "
+                                              "board will be at a new address there.</p>");
     if (strstr(q, "wifi=bad")) SEND(req, "<p class=warn>Couldn't add that network: the name must be 1-32 "
                                          "characters and the password blank or 8-63 characters.</p>");
     if (!settings_has_api_key()) {
@@ -350,8 +352,9 @@ static esp_err_t get_root(httpd_req_t *req)
 
     // Wi-Fi networks: home, phone hotspot, work, ...
     SEND(req, "<div class=card id=wifi><h2 style='margin-top:0'>Wi-Fi networks</h2>"
-              "<p class=note style='margin-top:0'>The board joins whichever of these is around, strongest first. "
-              "Add your phone's hotspot to use it away from home.</p>");
+              "<p class=note style='margin-top:0'>The board joins whichever of these is around, strongest first "
+              "(<em>Use now</em> switches straight away). Passwords are stored encrypted. If none is around, "
+              "the board opens its own <em>Jarvis-Setup</em> network so you can set it up from a phone.</p>");
     char (*nets)[NET_SSID_MAX] = calloc(NET_MAX_SAVED, NET_SSID_MAX);
     int nn = nets ? net_saved_networks(nets, NET_MAX_SAVED) : 0;
     char cur_ssid[NET_SSID_MAX] = "";
@@ -364,8 +367,12 @@ static esp_err_t get_root(httpd_req_t *req)
         if (!strcmp(nets[i], cur_ssid)) SEND(req, " <small class=ok>(connected)</small>");
         SEND(req, "</span><input type=hidden name=ssid value=\"");
         send_escaped(req, nets[i]);
-        SEND(req, "\"><button type=submit style='margin:0;flex:none'"
-                  " onclick=\"return confirm('Forget this network?')\">Forget</button></form>");
+        SEND(req, "\"><span style='display:flex;gap:6px;flex:none'>");
+        if (strcmp(nets[i], cur_ssid) != 0) {
+            SEND(req, "<button type=submit formaction=/wifi/select style='margin:0'>Use now</button>");
+        }
+        SEND(req, "<button type=submit style='margin:0'"
+                  " onclick=\"return confirm('Forget this network?')\">Forget</button></span></form>");
     }
     free(nets);
     if (!nn) SEND(req, "<p class=note>None saved yet.</p>");
@@ -441,6 +448,17 @@ static esp_err_t post_wifi_forget(httpd_req_t *req)
     form_field(body, "ssid", ssid, sizeof(ssid));
     if (net_forget(ssid) == ESP_OK) leds_event(LEDS_EVENT_DELETED);
     return redirect(req, "/?wifi=forgot#wifi");
+}
+
+static esp_err_t post_wifi_select(httpd_req_t *req)
+{
+    if (!same_origin(req)) return forbid(req);
+    char body[160], ssid[NET_SSID_MAX] = "";
+    if (!read_form(req, body, sizeof(body))) return ESP_FAIL;
+    form_field(body, "ssid", ssid, sizeof(ssid));
+    esp_err_t err = net_select(ssid);
+    if (err == ESP_OK) leds_event(LEDS_EVENT_SAVED);
+    return redirect(req, err == ESP_OK ? "/?wifi=switching#wifi" : "/?wifi=bad#wifi");
 }
 
 static esp_err_t post_save(httpd_req_t *req)
@@ -934,6 +952,7 @@ esp_err_t setup_web_start(void)
         { .uri = "/intercom/status",  .method = HTTP_GET,  .handler = get_intercom_status },
         { .uri = "/intercom/messages.json", .method = HTTP_GET, .handler = get_intercom_messages },
         { .uri = "/wifi/add",         .method = HTTP_POST, .handler = post_wifi_add },
+        { .uri = "/wifi/select",      .method = HTTP_POST, .handler = post_wifi_select },
         { .uri = "/wifi/forget",      .method = HTTP_POST, .handler = post_wifi_forget },
         { .uri = "/diag/messages.json", .method = HTTP_GET, .handler = get_messages_json },
         { .uri = "/diag/play",        .method = HTTP_POST, .handler = post_play },

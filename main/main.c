@@ -30,6 +30,7 @@
 #include "clock.h"
 #include "ota.h"
 #include "intercom.h"
+#include "captive.h"
 #include "dsp.h"
 #include "esp_system.h"
 #include <stdlib.h>
@@ -353,6 +354,22 @@ static void back_to_listening(void)
     wakeword_listen();
 }
 
+/** Setup hotspot on: the captive Wi-Fi page replaces the setup page (Wi-Fi setup only). */
+static void on_setup_ap(bool on, const char *ssid)
+{
+    if (on) {
+        setup_web_stop();
+        captive_start();
+        char s[80];
+        snprintf(s, sizeof(s), "can't reach Wi-Fi: setup hotspot \"%s\" is on", ssid);
+        diag_set_status("wifi", s);
+        prompts_say(PROMPT_WIFI_SETUP_HOTSPOT);   // "...connect your phone to the Jarvis Setup network"
+    } else {
+        captive_stop();
+        if (!net_on_public_network()) setup_web_start();
+    }
+}
+
 /** Public Wi-Fi (open network that isn't one of ours): no setup page for strangers. */
 static void on_wifi_trust(bool public_network)
 {
@@ -553,6 +570,7 @@ void app_main(void)
     ESP_ERROR_CHECK(net_init());
     net_set_allow_open(settings_get_open_wifi());
     net_on_trust_change(on_wifi_trust);
+    net_on_setup_ap(on_setup_ap);
     // No automatic update checks for now (frees a task's RAM). Updates still work on
     // request: "Jarvis, update yourself" or Check for updates / Install update.
     ESP_ERROR_CHECK(improv_start());           // Wi-Fi setup from the web flasher

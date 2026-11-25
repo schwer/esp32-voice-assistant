@@ -1,6 +1,7 @@
 # What's new, in plain words, newest first: one short sentence per line.
 # Jarvis reads the top three when he offers an update (and the diagnostics page
 # shows them), so add a line for every change people would notice.
+If I can't find your Wi-Fi, I open a Jarvis Setup network so you can set me up from your phone.
 The Test Gemini button now tries a real voice conversation, so it catches billing problems.
 If you put a microSD card in me, I keep new recordings on it.
 When I'm plugged in, I stay on Wi-Fi.
