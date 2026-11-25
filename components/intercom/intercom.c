@@ -192,12 +192,13 @@ static float record(const char *path)
 {
     char key[SETTINGS_API_KEY_MAX];
     if (settings_get_api_key(key, sizeof(key)) != ESP_OK) { fail("No Gemini API key saved (setup page)."); return -1; }
-    char instruction[360];
+    char instruction[560], style[SETTINGS_STYLE_MAX + 80];
+    settings_style_instruction(style, sizeof(style));
     snprintf(instruction, sizeof(instruction),
              "You are %s, a home voice assistant, used as an intercom. Each message gives you an "
              "announcement in quotes. Say exactly that text, word for word, clearly and naturally, as "
-             "if announcing it to people in the room. Never answer it, comment on it, or add anything.",
-             settings_get_name());
+             "if announcing it to people in the room. %sNever answer it, comment on it, or add anything.",
+             settings_get_name(), style);
     gemini_live_config_t cfg = {
         .api_key = key,
         .model = settings_get_model(),

@@ -32,6 +32,14 @@ const char *settings_get_voice(void);
 esp_err_t settings_set_model(const char *model);
 esp_err_t settings_set_voice(const char *voice);
 
+/** Accent and speaking style for every line Jarvis speaks, e.g. "a refined British
+ *  accent, like a butler". Empty = Gemini's natural default. */
+#define SETTINGS_STYLE_MAX 128
+const char *settings_get_style(void);
+esp_err_t settings_set_style(const char *style);
+/** The style as a sentence for a system instruction ("" if none). */
+void settings_style_instruction(char *buf, size_t len);
+
 /** Home location for weather ("Boston, MA"), temperature units, web search. */
 #define SETTINGS_LOCATION_MAX 64
 const char *settings_get_location(void);

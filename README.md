@@ -36,6 +36,8 @@ There's no phone app and no cloud backend of your own.
   password (that screen only does Wi-Fi setup). Optionally uses free Wi-Fi with no password, but only if it really reaches
   the internet (networks that want you to click "Accept" on a page are skipped), and the setup page
   switches itself off on public networks.
+- **Voice and accent**: 30 Gemini voices, plus an **Accent and style** setting ("a refined British
+  accent, like a butler") used for conversations, the board's own messages and the intercom.
 - **Intercom**: on the board's Intercom page (linked from Diagnostics), type a message and Jarvis
   announces it after a chime, in his Gemini voice. The last 10 are kept as audio, so **Say again**
   replays one instantly, even without Gemini. "Jarvis, what was the last message?" works too.

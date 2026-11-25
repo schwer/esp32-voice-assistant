@@ -354,12 +354,13 @@ static void record_task(void *arg)
             strlcpy(s_error, out16 && s_cap ? "no API key saved" : "out of memory", sizeof(s_error));
             goto done;
         }
-        char instruction[400];
+        char instruction[600], style[SETTINGS_STYLE_MAX + 80];
+        settings_style_instruction(style, sizeof(style));
         snprintf(instruction, sizeof(instruction),
                  "You are recording short spoken lines for a home voice assistant named %s. "
                  "Each message gives you one line in quotes. Speak exactly that line, word for word, "
-                 "in a warm, friendly, natural tone. Never answer it, comment on it, or add anything "
-                 "before or after it.", settings_get_name());
+                 "in a warm, friendly, natural tone. %sNever answer it, comment on it, or add anything "
+                 "before or after it.", settings_get_name(), style);
         gemini_live_config_t cfg = {
             .api_key = key,
             .model = settings_get_model(),

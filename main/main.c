@@ -108,18 +108,19 @@ static char *build_instruction(bool google_search, bool proactive)
 
     char *appts = appointments_summary(14);
     const char *tools = tools_system_instruction();
-    char update_note[256] = "", newver[48];
+    char update_note[256] = "", newver[48], style[SETTINGS_STYLE_MAX + 80];
+    settings_style_instruction(style, sizeof(style));
     if (ota_should_mention(newver, sizeof(newver))) {
         snprintf(update_note, sizeof(update_note),
                  "A software update for you is available (version %s). At the end of your first answer, "
                  "mention it once in a few words and that they can say \"update yourself\" to install it.\n",
                  newver);
     }
-    size_t len = 2048 + strlen(tools) + strlen(update_note) + (appts ? strlen(appts) : 0);
+    size_t len = 2048 + strlen(tools) + strlen(update_note) + strlen(style) + (appts ? strlen(appts) : 0);
     char *buf = malloc(len);
     if (buf) {
         snprintf(buf, len,
-            "You are %s, a friendly voice assistant running on a small speaker in the user's home. "
+            "You are %s, a friendly voice assistant running on a small speaker in the user's home. %s"
             "The user talks to you out loud and hears your replies, so speak naturally and keep "
             "answers short: one to three sentences unless they ask for more. Never use lists, "
             "markdown, emojis or URLs. The user wakes you by saying \"Jarvis\".\n"
@@ -130,7 +131,7 @@ static char *build_instruction(bool google_search, bool proactive)
             "The user's home location is %s.\n"
             "%s"
             "%s%s%s",
-            settings_get_name(), now, settings_get_tz(),
+            settings_get_name(), style, now, settings_get_tz(),
             proactive ? "Only speak when the user is talking to you. If you hear background noise, a TV "
                         "or radio, or people talking to each other, stay silent. After you answer, stop "
                         "and wait: don't add follow-up questions or keep talking unless you need more "

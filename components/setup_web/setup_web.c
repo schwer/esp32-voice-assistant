@@ -285,18 +285,31 @@ static esp_err_t get_root(httpd_req_t *req)
                                         : "<option value=F>Fahrenheit</option><option value=C selected>Celsius</option>");
     SEND(req, "</select>");
 
-    static const char *const VOICES[] = { "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr" };
+    // Gemini Live's prebuilt voices, with Google's one-word descriptions.
+    static const char *const VOICES[][2] = {
+        { "Puck", "upbeat" }, { "Charon", "informative" }, { "Kore", "firm" }, { "Fenrir", "excitable" },
+        { "Aoede", "breezy" }, { "Leda", "youthful" }, { "Orus", "firm" }, { "Zephyr", "bright" },
+        { "Callirrhoe", "easy-going" }, { "Autonoe", "bright" }, { "Enceladus", "breathy" }, { "Iapetus", "clear" },
+        { "Umbriel", "easy-going" }, { "Algieba", "smooth" }, { "Despina", "smooth" }, { "Erinome", "clear" },
+        { "Algenib", "gravelly" }, { "Rasalgethi", "informative" }, { "Laomedeia", "upbeat" }, { "Achernar", "soft" },
+        { "Alnilam", "firm" }, { "Schedar", "even" }, { "Gacrux", "mature" }, { "Pulcherrima", "forward" },
+        { "Achird", "friendly" }, { "Zubenelgenubi", "casual" }, { "Vindemiatrix", "gentle" },
+        { "Sadachbia", "lively" }, { "Sadaltager", "knowledgeable" }, { "Sulafat", "warm" },
+    };
     SEND(req, "<label for=voice>Voice</label><select id=voice name=voice>");
     const char *cur_voice = settings_get_voice();
     bool voice_found = false;
     for (size_t i = 0; i < sizeof(VOICES) / sizeof(VOICES[0]); i++) {
-        bool sel = strcmp(cur_voice, VOICES[i]) == 0;
+        bool sel = strcmp(cur_voice, VOICES[i][0]) == 0;
         voice_found |= sel;
-        SEND(req, "<option");
+        SEND(req, "<option value=");
+        SEND(req, VOICES[i][0]);
         if (sel) SEND(req, " selected");
         SEND(req, ">");
-        SEND(req, VOICES[i]);
-        SEND(req, "</option>");
+        SEND(req, VOICES[i][0]);
+        SEND(req, " (");
+        SEND(req, VOICES[i][1]);
+        SEND(req, ")</option>");
     }
     if (!voice_found) {
         SEND(req, "<option selected>");
@@ -306,6 +319,18 @@ static esp_err_t get_root(httpd_req_t *req)
     SEND(req, "</select><p class=note>The board uses one voice for everything. When you save a new voice, "
               "the board records all of its own messages (\"Yes?\", \"Settings saved\", ...) in it right away; "
               "you'll see the progress at the top of this page.</p>");
+
+    SEND(req, "<label for=style>Accent and style</label><input id=style name=style maxlength=127 list=styles "
+              "placeholder='Gemini&#39;s natural voice' value=\"");
+    send_escaped(req, settings_get_style());
+    SEND(req, "\"><datalist id=styles>"
+              "<option value='a refined British accent, calm and polite, like a butler'>"
+              "<option value='a warm British accent, like a BBC presenter'>"
+              "<option value='a friendly Scottish accent'><option value='a friendly Irish accent'>"
+              "<option value='a relaxed Australian accent'><option value='a clear, neutral American accent'>"
+              "</datalist><p class=note>How Jarvis should sound, in your own words, e.g. <em>a refined British accent, "
+              "like a butler</em>. Used for conversations, his own messages and the intercom; saving a change "
+              "re-records his messages. Accents work best with Gemini's native-audio models.</p>");
 
     SEND(req, "<label for=model>Gemini model</label><input id=model name=model maxlength=63 "
               "spellcheck=false autocomplete=off value=\"");
@@ -511,6 +536,11 @@ static esp_err_t post_save(httpd_req_t *req)
     if (form_field(body, "location", val, sizeof(val))) {
         err |= settings_set_location(val);                // empty clears it
     }
+    bool style_changed = false;
+    if (form_field(body, "style", val, sizeof(val)) && strcmp(val, settings_get_style()) != 0) {
+        err |= settings_set_style(val);                   // empty: Gemini's natural voice
+        style_changed = true;
+    }
     if (form_field(body, "units", val, sizeof(val)) && val[0]) {
         err |= settings_set_fahrenheit(val[0] == 'F');
     }
@@ -537,6 +567,8 @@ static esp_err_t post_save(httpd_req_t *req)
     if (err == ESP_OK && settings_has_api_key() && !voicepack_matches_selected() &&
         !(voicepack_pending() && strcmp(voicepack_progress_voice(), settings_get_voice()) == 0)) {
         recording = voicepack_request(false) == ESP_OK;
+    } else if (err == ESP_OK && style_changed && settings_has_api_key() && voicepack_matches_selected()) {
+        recording = voicepack_request(true) == ESP_OK;     // same voice, new accent: record the messages again
     } else if (voicepack_pending()) {
         recording = true;                              // already recording this voice
     }
