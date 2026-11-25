@@ -91,7 +91,13 @@ static void send_escaped(httpd_req_t *req, const char *s)
     }
 }
 
-#define SEND(req, s) httpd_resp_sendstr_chunk((req), (s))
+/** Send part of a page. Empty text is skipped: an empty chunk would end the page early
+ *  (this cut the setup page off at the "Automatic" accent region option). */
+static esp_err_t send_part(httpd_req_t *req, const char *s)
+{
+    return (s && s[0]) ? httpd_resp_sendstr_chunk(req, s) : ESP_OK;
+}
+#define SEND(req, s) send_part((req), (s))
 
 static bool form_field(const char *body, const char *key, char *out, size_t len)
 {

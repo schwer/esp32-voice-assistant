@@ -353,3 +353,13 @@ def test_static_internal_ram_budget_is_set_and_leaves_room():
     limit = b["internal_ram_static_max_bytes"]
     assert isinstance(limit, int), "set internal_ram_static_max_bytes so the build enforces it"
     assert limit <= 200 * 1024, "keep static internal RAM well below the ~340 KB the chip has"
+
+
+def test_setup_page_never_sends_an_empty_chunk():
+    # An empty chunk ends a chunked HTTP response: the setup page was cut off at an
+    # option with an empty value. Page text goes through SEND, which skips empty text;
+    # the only direct call is the real end of the page.
+    src = (ROOT / "components/setup_web/setup_web.c").read_text()
+    direct = re.findall(r"httpd_resp_sendstr_chunk\((.*?)\)", src)
+    assert all(arg.strip() in ("req, s", "req, NULL") for arg in direct), direct
+    assert "s && s[0]" in src
